@@ -7,6 +7,13 @@ std::vector<Building::Ptr> BuildingTools::getBuildings(double lat, double lon) {
 	if(!async_handle.joinable() || async_handle.try_join_for(boost::chrono::milliseconds(1))){
 		async_handle = boost::thread(boost::bind(&BuildingTools::downloadBuildings, this, lat, lon));
 	}
+
+	// polling with timeout, in case we can get all buildings in the first call
+	ros::WallTime timeout = ros::WallTime::now() + ros::WallDuration(2);
+	while(xml_tree.empty() && ros::WallTime::now() < timeout){
+		ros::WallDuration(0.1).sleep();
+	}
+
 	parseBuildings(lat, lon);
 
 	return buildings;

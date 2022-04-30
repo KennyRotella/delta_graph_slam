@@ -45,15 +45,7 @@ private:
      */
     void optimization_timer_callback(const ros::WallTimerEvent& event) {
 
-        ros::WallTime start_, end_;
-        start_ = ros::WallTime::now();
-
         create_buildings_pointcloud();
-
-        end_ = ros::WallTime::now();
-        // print results
-        double execution_time = (end_ - start_).toNSec() * 1e-6;
-        ROS_INFO_STREAM("Exectution time (ms): " << execution_time);
 
         if(markers_pub.getNumSubscribers()) {
             create_marker_array();
