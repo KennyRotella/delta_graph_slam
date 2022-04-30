@@ -4,7 +4,7 @@
 
   <!-- arguments -->
   <arg name="nodelet_manager" default="velodyne_nodelet_manager" />
-  <arg name="enable_floor_detection" default="true" />
+  <arg name="enable_floor_detection" default="false" />
   <arg name="enable_gps" default="true" />
   <arg name="enable_imu_acc" default="false" />
   <arg name="enable_imu_ori" default="false" />
@@ -75,17 +75,6 @@
     <param name="reg_correspondence_randomness" value="20"/>
     <param name="reg_resolution" value="1.0" />
     <param name="reg_nn_search_method" value="DIRECT7" />
-  </node>
-
-  <!-- floor_detection_nodelet -->
-  <node pkg="nodelet" type="nodelet" name="floor_detection_nodelet" args="load hdl_graph_slam/FloorDetectionNodelet $(arg nodelet_manager)" if="$(arg enable_floor_detection)">
-    <param name="points_topic" value="$(arg points_topic)" />
-    <param name="tilt_deg" value="0.0" />
-    <param name="sensor_height" value="2.0" />
-    <param name="height_clip_range" value="1.0" />
-    <param name="floor_pts_thresh" value="512" />
-    <param name="use_normal_filtering" value="true" />
-    <param name="normal_filter_thresh" value="20.0" />
   </node>
   
   <!-- hdl_graph_slam_nodelet -->

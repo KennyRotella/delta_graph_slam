@@ -16,6 +16,7 @@
 
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
+#include <pcl/features/normal_3d.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/approximate_voxel_grid.h>
@@ -43,6 +44,7 @@ public:
 
     points_sub = nh.subscribe("/velodyne_points", 64, &PrefilteringNodelet::cloud_callback, this);
     points_pub = nh.advertise<sensor_msgs::PointCloud2>("/filtered_points", 32);
+    flat_points_pub = nh.advertise<sensor_msgs::PointCloud2>("/filtered_flat_points", 32);
     colored_pub = nh.advertise<sensor_msgs::PointCloud2>("/colored_points", 32);
   }
 
@@ -104,6 +106,10 @@ private:
   }
 
   void cloud_callback(const pcl::PointCloud<PointT>& src_cloud_r) {
+
+    ros::WallTime start_, end_;
+    start_ = ros::WallTime::now();
+
     pcl::PointCloud<PointT>::ConstPtr src_cloud = src_cloud_r.makeShared();
     if(src_cloud->empty()) {
       return;
@@ -133,6 +139,100 @@ private:
     filtered = outlier_removal(filtered);
 
     points_pub.publish(*filtered);
+
+    filtered = height_filtering(filtered);
+    filtered = normal_filtering(filtered);
+    filtered = flatten(filtered);
+    filtered = outlier_removal(filtered);
+
+    flat_points_pub.publish(*filtered);
+
+    end_ = ros::WallTime::now();
+    // print results
+    double execution_time = (end_ - start_).toNSec() * 1e-6;
+    ROS_INFO_STREAM("Exectution time (ms): " << execution_time);
+  }
+
+  pcl::PointCloud<PointT>::ConstPtr flatten(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+
+    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
+    filtered->reserve(cloud->size());
+
+    float normal_filter_thresh = 0.2f;
+    for(int i = 0; i < cloud->size(); i++) {
+        PointT point = cloud->at(i);
+        point.z = 0;
+        filtered->push_back(point);
+    }
+
+    filtered->width = filtered->size();
+    filtered->height = 1;
+    filtered->is_dense = false;
+    filtered->header = cloud->header;
+
+    return filtered;
+  }
+
+      /**
+   * @brief filter points with negative y
+   * @param cloud  input cloud
+   * @return filtered cloud
+   */
+  pcl::PointCloud<PointT>::Ptr height_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+
+    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
+    filtered->reserve(cloud->size());
+
+    float normal_filter_thresh = 0.2f;
+    for(int i = 0; i < cloud->size(); i++) {
+      if(cloud->at(i).z > 0) {
+        filtered->push_back(cloud->at(i));
+      }
+    }
+
+    filtered->width = filtered->size();
+    filtered->height = 1;
+    filtered->is_dense = false;
+    filtered->header = cloud->header;
+
+    return filtered;
+  }
+
+    /**
+   * @brief filter points with non-vertical normals
+   * @param cloud  input cloud
+   * @return filtered cloud
+   */
+  pcl::PointCloud<PointT>::Ptr normal_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+    pcl::NormalEstimation<PointT, pcl::Normal> ne;
+    ne.setInputCloud(cloud);
+
+    pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
+    ne.setSearchMethod(tree);
+
+    pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
+    ne.setKSearch(10);
+    float sensor_height = 1.73f;
+    ne.setViewPoint(0.0f, 0.0f, sensor_height);
+    ne.compute(*normals);
+
+    pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
+    filtered->reserve(cloud->size());
+
+    float normal_filter_thresh = 0.2f;
+    for(int i = 0; i < cloud->size(); i++) {
+      Eigen::Vector3f normal = normals->at(i).getNormalVector3fMap().normalized();
+      if(std::abs(normal.z()) < normal_filter_thresh) {
+        filtered->push_back(cloud->at(i));
+      }
+    }
+
+    filtered->width = filtered->size();
+    filtered->height = 1;
+    filtered->is_dense = false;
+    filtered->header = cloud->header;
+
+    return filtered;
   }
 
   pcl::PointCloud<PointT>::ConstPtr downsample(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
@@ -251,6 +351,8 @@ private:
 
   ros::Subscriber points_sub;
   ros::Publisher points_pub;
+  ros::Publisher flat_points_pub;
+
 
   ros::Publisher colored_pub;
 
