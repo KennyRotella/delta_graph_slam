@@ -20,8 +20,15 @@ namespace hdl_graph_slam {
  * @param child_frame_id   tf child frame_id
  * @return converted TransformStamped
  */
-static geometry_msgs::TransformStamped matrix2transform(const ros::Time& stamp, const Eigen::Matrix4f& pose, const std::string& frame_id, const std::string& child_frame_id) {
-  Eigen::Quaternionf quat(pose.block<3, 3>(0, 0));
+static geometry_msgs::TransformStamped matrix2transform(const ros::Time& stamp, const Eigen::Matrix3f& pose, const std::string& frame_id, const std::string& child_frame_id) {
+  // rotation 2D to 3D
+  Eigen::Rotation2Df rot2D(pose.block<2,2>(0,0));
+  Eigen::Matrix3f rot;
+  rot = Eigen::AngleAxisf(0, Eigen::Vector3f::UnitX())
+    * Eigen::AngleAxisf(0, Eigen::Vector3f::UnitY())
+    * Eigen::AngleAxisf(rot2D.angle(), Eigen::Vector3f::UnitZ());
+
+  Eigen::Quaternionf quat(rot);
   quat.normalize();
   geometry_msgs::Quaternion odom_quat;
   odom_quat.w = quat.w();
@@ -34,9 +41,9 @@ static geometry_msgs::TransformStamped matrix2transform(const ros::Time& stamp, 
   odom_trans.header.frame_id = frame_id;
   odom_trans.child_frame_id = child_frame_id;
 
-  odom_trans.transform.translation.x = pose(0, 3);
-  odom_trans.transform.translation.y = pose(1, 3);
-  odom_trans.transform.translation.z = pose(2, 3);
+  odom_trans.transform.translation.x = pose(0, 2);
+  odom_trans.transform.translation.y = pose(1, 2);
+  odom_trans.transform.translation.z = .0f;
   odom_trans.transform.rotation = odom_quat;
 
   return odom_trans;
@@ -86,6 +93,64 @@ static Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_ms
   isometry.linear() = quat.toRotationMatrix();
   isometry.translation() = Eigen::Vector3d(position.x, position.y, position.z);
   return isometry;
+}
+
+/**
+ * @brief object orientations could have multiple combination of roll, pitch and yaw,
+ * for example an orientation (ψ,θ,φ) is equal to (ψ,θ,φ) + (i*π,+j*π,k*π) with any combination of integers i,j,k s.t. abs(i)=abs(j)=abs(k),
+ * this computation ensures that we choose the euler angles vector with minimum norm.
+ * assumption is that all angles are in range [-π,π]
+ * @param euler_angs roll, pitch and yaw vector
+ */
+Eigen::Vector3f normalize_euler_angs(Eigen::Vector3f euler_angs){
+  Eigen::Vector3f euler_angs_norm;
+
+  euler_angs_norm(0) = euler_angs(0) - M_PI*(euler_angs(0)>=.0f ?1 :-1);
+  euler_angs_norm(1) = euler_angs(1) - M_PI*(euler_angs(1)>=.0f ?1 :-1);
+  euler_angs_norm(2) = euler_angs(2) - M_PI*(euler_angs(2)>=.0f ?1 :-1);
+
+  return euler_angs_norm.norm() < euler_angs.norm() ?euler_angs_norm :euler_angs;
+}
+
+static Eigen::Matrix4f transform2Dto3D(Eigen::Matrix3f trans2D){
+  // rotation 2D to 3D
+  Eigen::Rotation2Df rot2D(trans2D.block<2,2>(0,0));
+  Eigen::Matrix3f rot;
+  rot = Eigen::AngleAxisf(0, Eigen::Vector3f::UnitX())
+    * Eigen::AngleAxisf(0, Eigen::Vector3f::UnitY())
+    * Eigen::AngleAxisf(rot2D.angle(), Eigen::Vector3f::UnitZ());
+
+  if(!rot.isUnitary()){
+    ROS_WARN("Error during 2D transform conversion to 3D, matrix should be unitary!");
+    std::cout << rot << std::endl << "is unitary: " << rot.isUnitary() << std::endl;
+  }
+
+  // translation 2D to 3D
+  Eigen::Vector3f translation(trans2D(0,2), trans2D(1,2), 0);
+  
+  Eigen::Matrix4f trans3D = Eigen::Matrix4f::Identity();
+  trans3D.block<3,3>(0,0) = rot;
+  trans3D.block<3,1>(0,3) = translation;
+
+  return trans3D;
+}
+
+static Eigen::Matrix3f transform3Dto2D(Eigen::Matrix4f trans3D){
+  // rotation 3D to 2D
+  Eigen::Quaternionf quat(trans3D.block<3,3>(0,0));
+  Eigen::Vector3f euler_angs = quat.toRotationMatrix().eulerAngles(0,1,2);
+  // cannot simply use yaw angle removing the others without normalization
+  euler_angs = normalize_euler_angs(euler_angs);
+  Eigen::Rotation2Df rot2D(euler_angs.z());
+
+  // translation 3D to 2D
+  Eigen::Vector2f translation(trans3D(0,3), trans3D(1,3));
+
+  Eigen::Matrix3f trans2D = Eigen::Matrix3f::Identity();
+  trans2D.block<2,2>(0,0) = rot2D.toRotationMatrix();
+  trans2D.block<2,1>(0,2) = translation;
+
+  return trans2D;
 }
 
 }  // namespace hdl_graph_slam

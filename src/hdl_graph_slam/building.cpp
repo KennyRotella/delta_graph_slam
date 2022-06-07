@@ -2,6 +2,6 @@
 
 namespace hdl_graph_slam {
 	
-Building::Building(void) {geometry = pcl::PointCloud<PointT3>::Ptr(new pcl::PointCloud<PointT3>);}
+Building::Building(void) {cloud.reset(new pcl::PointCloud<PointT>); node=nullptr;}
 
-}
+}  // namespace hdl_graph_slam

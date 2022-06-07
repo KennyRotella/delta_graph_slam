@@ -10,9 +10,11 @@
 
 namespace g2o {
 class VertexSE3;
+class VertexSE2;
 class VertexPlane;
 class VertexPointXYZ;
 class EdgeSE3;
+class EdgeSE2;
 class EdgeSE3Plane;
 class EdgeSE3PointXYZ;
 class EdgeSE3PriorXY;
@@ -117,6 +119,10 @@ public:
   g2o::EdgePlaneParallel* add_plane_parallel_edge(g2o::VertexPlane* v_plane1, g2o::VertexPlane* v_plane2, const Eigen::Vector3d& measurement, const Eigen::Matrix3d& information);
 
   g2o::EdgePlanePerpendicular* add_plane_perpendicular_edge(g2o::VertexPlane* v_plane1, g2o::VertexPlane* v_plane2, const Eigen::Vector3d& measurement, const Eigen::MatrixXd& information);
+
+  g2o::VertexSE2* add_se2_node(const Eigen::Isometry2d& pose);
+
+  g2o::EdgeSE2* add_se2_edge(g2o::VertexSE2* v1, g2o::VertexSE2* v2, const Eigen::Isometry2d& relative_pose, const Eigen::MatrixXd& information_matrix);
 
   void add_robust_kernel(g2o::HyperGraph::Edge* edge, const std::string& kernel_type, double kernel_size);
 

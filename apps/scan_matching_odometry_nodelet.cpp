@@ -32,7 +32,7 @@ namespace hdl_graph_slam {
 
 class ScanMatchingOdometryNodelet : public nodelet::Nodelet {
 public:
-  typedef pcl::PointXYZI PointT;
+  typedef pcl::PointXYZ PointT;
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   ScanMatchingOdometryNodelet() {}
@@ -117,7 +117,16 @@ private:
     pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
     pcl::fromROSMsg(*cloud_msg, *cloud);
 
+    ros::WallTime start_, end_;
+    start_ = ros::WallTime::now();
+
     Eigen::Matrix4f pose = matching(cloud_msg->header.stamp, cloud);
+
+    end_ = ros::WallTime::now();
+    // print results
+    double execution_time = (end_ - start_).toNSec() * 1e-6;
+    // ROS_INFO_STREAM("Exectution time (ms): " << execution_time);
+
     publish_odometry(cloud_msg->header.stamp, cloud_msg->header.frame_id, pose);
 
     // In offline estimation, point clouds until the published time will be supplied
@@ -234,7 +243,7 @@ private:
     prev_time = stamp;
     prev_trans = trans;
 
-    auto keyframe_trans = matrix2transform(stamp, keyframe_pose, odom_frame_id, "keyframe");
+    auto keyframe_trans = matrix2transform(stamp, transform3Dto2D(keyframe_pose), odom_frame_id, "keyframe");
     keyframe_broadcaster.sendTransform(keyframe_trans);
 
     double delta_trans = trans.block<3, 1>(0, 3).norm();
@@ -250,7 +259,7 @@ private:
       prev_trans.setIdentity();
     }
 
-    if (aligned_points_pub.getNumSubscribers() > 0)
+    if(aligned_points_pub.getNumSubscribers() > 0)
     {
       pcl::transformPointCloud (*cloud, *aligned, odom);
       aligned->header.frame_id=odom_frame_id;
@@ -266,8 +275,11 @@ private:
    * @param pose   odometry pose to be published
    */
   void publish_odometry(const ros::Time& stamp, const std::string& base_frame_id, const Eigen::Matrix4f& pose) {
+    // flatten the transform in 2D
+    Eigen::Matrix3f flat_pose = transform3Dto2D(pose);
+
     // publish transform stamped for IMU integration
-    geometry_msgs::TransformStamped odom_trans = matrix2transform(stamp, pose, odom_frame_id, base_frame_id);
+    geometry_msgs::TransformStamped odom_trans = matrix2transform(stamp, flat_pose, odom_frame_id, base_frame_id);
     trans_pub.publish(odom_trans);
 
     // broadcast the transform over tf
@@ -294,7 +306,7 @@ private:
   /**
    * @brief publish scan matching status
    */
-  void publish_scan_matching_status(const ros::Time& stamp, const std::string& frame_id, pcl::PointCloud<pcl::PointXYZI>::ConstPtr aligned, const std::string& msf_source, const Eigen::Isometry3f& msf_delta) {
+  void publish_scan_matching_status(const ros::Time& stamp, const std::string& frame_id, pcl::PointCloud<pcl::PointXYZ>::ConstPtr aligned, const std::string& msf_source, const Eigen::Isometry3f& msf_delta) {
     if(!status_pub.getNumSubscribers()) {
       return;
     }

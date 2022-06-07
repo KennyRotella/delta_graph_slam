@@ -11,7 +11,7 @@ namespace hdl_graph_slam {
 
 class InformationMatrixCalculator {
 public:
-  using PointT = pcl::PointXYZI;
+  using PointT = pcl::PointXYZ;
 
   InformationMatrixCalculator() {}
   InformationMatrixCalculator(ros::NodeHandle& nh);

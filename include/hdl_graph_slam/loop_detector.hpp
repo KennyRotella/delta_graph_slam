@@ -7,8 +7,9 @@
 #include <hdl_graph_slam/keyframe.hpp>
 #include <hdl_graph_slam/registrations.hpp>
 #include <hdl_graph_slam/graph_slam.hpp>
+#include <hdl_graph_slam/ros_utils.hpp>
 
-#include <g2o/types/slam3d/vertex_se3.h>
+#include <g2o/types/slam2d/vertex_se2.h>
 
 namespace hdl_graph_slam {
 
@@ -17,12 +18,13 @@ public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   using Ptr = std::shared_ptr<Loop>;
 
-  Loop(const KeyFrame::Ptr& key1, const KeyFrame::Ptr& key2, const Eigen::Matrix4f& relpose) : key1(key1), key2(key2), relative_pose(relpose) {}
+  Loop(const KeyFrame::Ptr& key1, const KeyFrame::Ptr& key2, const Eigen::Matrix4f& relpose, const Eigen::Matrix3f& relpose2D) : key1(key1), key2(key2), relative_pose(relpose), relative_pose2D(relpose2D) {}
 
 public:
   KeyFrame::Ptr key1;
   KeyFrame::Ptr key2;
   Eigen::Matrix4f relative_pose;
+  Eigen::Matrix3f relative_pose2D;
 };
 
 /**
@@ -30,7 +32,7 @@ public:
  */
 class LoopDetector {
 public:
-  typedef pcl::PointXYZI PointT;
+  typedef pcl::PointXYZ PointT;
 
   /**
    * @brief constructor
@@ -134,12 +136,12 @@ private:
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
     for(const auto& candidate : candidate_keyframes) {
       registration->setInputSource(candidate->cloud);
-      Eigen::Isometry3d new_keyframe_estimate = new_keyframe->node->estimate();
-      new_keyframe_estimate.linear() = Eigen::Quaterniond(new_keyframe_estimate.linear()).normalized().toRotationMatrix();
-      Eigen::Isometry3d candidate_estimate = candidate->node->estimate();
-      candidate_estimate.linear() = Eigen::Quaterniond(candidate_estimate.linear()).normalized().toRotationMatrix();
-      Eigen::Matrix4f guess = (new_keyframe_estimate.inverse() * candidate_estimate).matrix().cast<float>();
-      guess(2, 3) = 0.0;
+      Eigen::Isometry2d new_keyframe_estimate = new_keyframe->estimate();
+      Eigen::Isometry2d candidate_estimate = candidate->estimate();
+      Eigen::Matrix3f guess2D = (new_keyframe_estimate.inverse() * candidate_estimate).matrix().cast<float>();
+
+      Eigen::Matrix4f guess = transform2Dto3D(guess2D);
+      
       registration->align(*aligned, guess);
       std::cout << "." << std::flush;
 
@@ -167,7 +169,7 @@ private:
 
     last_edge_accum_distance = new_keyframe->accum_distance;
 
-    return std::make_shared<Loop>(new_keyframe, best_matched, relative_pose);
+    return std::make_shared<Loop>(new_keyframe, best_matched, relative_pose, transform3Dto2D(relative_pose));
   }
 
 private:
