@@ -164,7 +164,7 @@ class BagPlayer:
 
 	def play(self):
 		print('play realtime for 3.0[sec]')
-		topic, msg, stamp = self.play_realtime(rospy.Duration(5.0))
+		topic, msg, stamp = self.play_realtime(rospy.Duration(3.0))
 		self.update_time_subs()
 
 		print('play as fast as possible')

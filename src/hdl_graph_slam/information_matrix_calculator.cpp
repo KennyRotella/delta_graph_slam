@@ -24,9 +24,9 @@ InformationMatrixCalculator::~InformationMatrixCalculator() {}
 
 Eigen::MatrixXd InformationMatrixCalculator::calc_information_matrix(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose) const {
   if(use_const_inf_matrix) {
-    Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(6, 6);
-    inf.topLeftCorner(3, 3).array() /= const_stddev_x;
-    inf.bottomRightCorner(3, 3).array() /= const_stddev_q;
+    Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(3, 3);
+    inf.topLeftCorner(2, 2).array() /= const_stddev_x;
+    inf.bottomRightCorner(1, 1).array() /= const_stddev_q;
     return inf;
   }
 
@@ -40,9 +40,9 @@ Eigen::MatrixXd InformationMatrixCalculator::calc_information_matrix(const pcl::
   float w_x = weight(var_gain_a, fitness_score_thresh, min_var_x, max_var_x, fitness_score);
   float w_q = weight(var_gain_a, fitness_score_thresh, min_var_q, max_var_q, fitness_score);
 
-  Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(6, 6);
-  inf.topLeftCorner(3, 3).array() /= w_x;
-  inf.bottomRightCorner(3, 3).array() /= w_q;
+  Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(3, 3);
+  inf.topLeftCorner(2, 2).array() /= w_x;
+  inf.bottomRightCorner(1, 1).array() /= w_q;
   return inf;
 }
 

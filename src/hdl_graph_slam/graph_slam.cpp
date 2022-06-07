@@ -13,6 +13,7 @@
 #include <g2o/core/optimization_algorithm_factory.h>
 #include <g2o/solvers/pcg/linear_solver_pcg.h>
 #include <g2o/types/slam3d/types_slam3d.h>
+#include <g2o/types/slam2d/types_slam2d.h>
 #include <g2o/types/slam3d/edge_se3_pointxyz.h>
 #include <g2o/types/slam3d_addons/types_slam3d_addons.h>
 #include <g2o/edge_se3_plane.hpp>
@@ -267,6 +268,26 @@ g2o::EdgePlanePerpendicular* GraphSLAM::add_plane_perpendicular_edge(g2o::Vertex
   edge->setInformation(information);
   edge->vertices()[0] = v_plane1;
   edge->vertices()[1] = v_plane2;
+  graph->addEdge(edge);
+
+  return edge;
+}
+
+g2o::VertexSE2* GraphSLAM::add_se2_node(const Eigen::Isometry2d& pose) {
+  g2o::VertexSE2* vertex(new g2o::VertexSE2());
+  vertex->setId(static_cast<int>(graph->vertices().size()));
+  vertex->setEstimate(pose);
+  graph->addVertex(vertex);
+
+  return vertex;
+}
+
+g2o::EdgeSE2* GraphSLAM::add_se2_edge(g2o::VertexSE2* v1, g2o::VertexSE2* v2, const Eigen::Isometry2d& relative_pose, const Eigen::MatrixXd& information_matrix) {
+  g2o::EdgeSE2* edge(new g2o::EdgeSE2());
+  edge->setMeasurement(relative_pose);
+  edge->setInformation(information_matrix);
+  edge->vertices()[0] = v1;
+  edge->vertices()[1] = v2;
   graph->addEdge(edge);
 
   return edge;

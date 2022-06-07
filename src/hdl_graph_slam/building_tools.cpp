@@ -14,16 +14,26 @@ std::vector<Building::Ptr> BuildingTools::getBuildings(double lat, double lon) {
 		ros::WallDuration(0.1).sleep();
 	}
 
-	parseBuildings(lat, lon);
+	std::vector<Building::Ptr> buildings_in_range;
+	buildings_in_range = parseBuildings(lat, lon);
 
-	return buildings;
+	return buildings_in_range;
+}
+
+std::vector<Building::Ptr> BuildingTools::getBuildingNodes() {
+	std::vector<Building::Ptr> buildingNodes;
+	for(Building::Ptr building : buildings){
+		if(building->node){
+      buildingNodes.push_back(building);
+		}
+	}
+	return buildingNodes;
 }
 
 void BuildingTools::downloadBuildings(double lat, double lon) {
 
 	Eigen::Vector3f pointXYZ = toEnu(Eigen::Vector3d(lat, lon, 0)).getVector3fMap();
 	if(!xml_tree.empty() && (pointXYZ - buffer_center).norm() < (2.0/3.0 * buffer_radius)){
-		std::cout << "OpenStreetMap xml tree already buffered" << std::endl;
 		return;
 	}
 
@@ -36,7 +46,6 @@ void BuildingTools::downloadBuildings(double lat, double lon) {
 			lat,
 			lon
 		);
-		std::cout << url << std::endl;
 
 		curlpp::Easy request;
 		curlpp::options::Url url_opt(url);
@@ -83,12 +92,12 @@ void BuildingTools::downloadBuildings(double lat, double lon) {
 	buffer_center = toEnu(Eigen::Vector3d(lat, lon, 0)).getVector3fMap();
 }
 
-void BuildingTools::parseBuildings(double lat, double lon) {
+std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon) {
 	std::lock_guard<std::mutex> lock(xml_tree_mutex);
+	std::vector<Building::Ptr> buildings_in_range;
 
 	if(xml_tree.empty()){
-		std::cout << "OpenStreetMap xml tree not buffered" << std::endl;
-		return;
+		return buildings_in_range;
 	}
 
 	try {
@@ -96,51 +105,41 @@ void BuildingTools::parseBuildings(double lat, double lon) {
 		if(tree_node.first == "way") {
 			std::string id = tree_node.second.get<std::string>("<xmlattr>.id");
 
-			if(buildings_map.count(id) || !isBuildingInRadius(tree_node, lat, lon)){
+			if(!isBuildingInRadius(tree_node, lat, lon)){
 				continue;
 			}
-			std::cout << "parsing new building..." << std::endl;
+
+			if(buildings_map.count(id)){
+				buildings_in_range.push_back(buildings_map[id]);
+				continue;
+			}
 
 			Building::Ptr new_building(new Building);
 			std::vector<std::string> nd_refs;
-			std::map<std::string,std::string> tags;
 
 			BOOST_FOREACH(pt::ptree::value_type &tree_node_2, tree_node.second) {
 				if(tree_node_2.first == "nd") {
 					std::string nd_ref = tree_node_2.second.get<std::string>("<xmlattr>.ref");
 					nd_refs.push_back(nd_ref);
-				} else if(tree_node_2.first == "tag") {
-					std::string key = tree_node_2.second.get<std::string>("<xmlattr>.k");
-					std::string value = tree_node_2.second.get<std::string>("<xmlattr>.v");
-					tags[key] = value;
 				}
 			}
 			new_building->id = id;
-			new_building->tags = tags;
-			pcl::PointCloud<PointT3>::Ptr building_pointcloud(buildPointCloud(nd_refs));
-			new_building->geometry = building_pointcloud;
-			new_building->vertices = getVertices(nd_refs);
+			new_building->pose = getBuildingPose(nd_refs);
+			pcl::PointCloud<PointT>::Ptr building_pointcloud(buildPointCloud(nd_refs));
+			new_building->cloud = building_pointcloud;
 
+			buildings_in_range.push_back(new_building);
 			buildings.push_back(new_building);
 			buildings_map[id] = new_building;
 		}
 	}} catch(pt::ptree_error &e) {
 		std::cerr<< "No xml! error:" << e.what() << std::endl;
 	}
+	return buildings_in_range;
 }
 
-pcl::PointCloud<PointT3>::Ptr BuildingTools::getVertices(std::vector<std::string> nd_refs) {
-	pcl::PointCloud<PointT3>::Ptr building_pointcloud(new pcl::PointCloud<PointT3>);
-	for(std::string nd_ref : nd_refs) {
-		Node node = getNode(nd_ref);
-		PointT3 pointXYZ = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
-		building_pointcloud->push_back(pointXYZ);
-	}
-	return building_pointcloud;		
-}
-
-pcl::PointCloud<PointT3>::Ptr BuildingTools::buildPointCloud(std::vector<std::string> nd_refs) {
-	pcl::PointCloud<PointT3>::Ptr building_pointcloud(new pcl::PointCloud<PointT3>);
+pcl::PointCloud<PointT>::Ptr BuildingTools::buildPointCloud(std::vector<std::string> nd_refs) {
+	pcl::PointCloud<PointT>::Ptr building_pointcloud(new pcl::PointCloud<PointT>);
 	Eigen::Vector3d previous;
 	int first = 1;
 	for(std::string nd_ref : nd_refs) {
@@ -157,6 +156,9 @@ pcl::PointCloud<PointT3>::Ptr BuildingTools::buildPointCloud(std::vector<std::st
 			previous = pointXYZ;
 		}
 	}
+	building_pointcloud->header.frame_id = "map";
+	pcl_conversions::toPCL(ros::Time::now(), building_pointcloud->header.stamp);
+
 	return building_pointcloud;
 }
 
@@ -169,16 +171,16 @@ BuildingTools::Node BuildingTools::getNode(std::string nd_ref) {
 	return Node();
 }
 
-pcl::PointCloud<PointT3>::Ptr BuildingTools::interpolate(PointT3 a, PointT3 b) {
-	// linear interpolation: return a line of points between a and b (1 every 10cm)
-	const float sample_step = 0.01;
-	pcl::PointCloud<PointT3>::Ptr building_pointcloud(new pcl::PointCloud<PointT3>);
+pcl::PointCloud<PointT>::Ptr BuildingTools::interpolate(PointT a, PointT b) {
+	// linear interpolation: return a line of points between a and b (1 every 2cm)
+	const float sample_step = 0.02;
+	pcl::PointCloud<PointT>::Ptr building_pointcloud(new pcl::PointCloud<PointT>);
 	Eigen::Vector3f AtoB = b.getVector3fMap()-a.getVector3fMap();
 	Eigen::Vector3f AtoBnormalized = AtoB.normalized();
 	float AtoBnorm = AtoB.norm();
 
 	for(float i=0; i<=AtoBnorm; i=i+sample_step) {
-		PointT3 pointXYZ;
+		PointT pointXYZ;
 
 		pointXYZ.x = a.x + i*AtoBnormalized.x();
 		pointXYZ.y = a.y + i*AtoBnormalized.y();
@@ -190,7 +192,7 @@ pcl::PointCloud<PointT3>::Ptr BuildingTools::interpolate(PointT3 a, PointT3 b) {
 }
 
 // toEnu converts to enu coordinates from lla
-PointT3 BuildingTools::toEnu(Eigen::Vector3d lla) {
+PointT BuildingTools::toEnu(Eigen::Vector3d lla) {
 	geographic_msgs::GeoPoint gps_msg;
 	geodesy::UTMPoint utm;
 
@@ -198,8 +200,13 @@ PointT3 BuildingTools::toEnu(Eigen::Vector3d lla) {
 	gps_msg.longitude = lla(1);
 	gps_msg.altitude = 0;
 	geodesy::fromMsg(gps_msg, utm);
+
+	PointT pointXYZ;
+	pointXYZ.x = utm.easting-zero_utm(0);
+	pointXYZ.y = utm.northing-zero_utm(1);
+	pointXYZ.z = 0.f;
 	
-	return PointT3((utm.easting-zero_utm(0)), (utm.northing-zero_utm(1)), 0);
+	return pointXYZ;
 }
 
 bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, double lat, double lon){
@@ -219,6 +226,33 @@ bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, d
 		std::cerr<< "No xml! error:" << e.what() << std::endl;
 	}
 	return false;
+}
+
+Eigen::Isometry2d BuildingTools::getBuildingPose(std::vector<std::string> nd_refs){
+	float x_min = std::numeric_limits<float>::max();
+	float x_max = std::numeric_limits<float>::lowest();
+	float y_min = std::numeric_limits<float>::max();
+	float y_max = std::numeric_limits<float>::lowest();
+
+	for(std::string nd_ref : nd_refs) {
+		Node node = getNode(nd_ref);
+		PointT enu_coords = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+		
+		x_min = enu_coords.x < x_min ? enu_coords.x : x_min;
+		x_max = enu_coords.x > x_max ? enu_coords.x : x_max;
+		y_min = enu_coords.y < y_min ? enu_coords.y : y_min;
+		y_max = enu_coords.y > y_max ? enu_coords.y : y_max;
+	}
+
+	// take middle point as building pose	
+	Eigen::Vector2d PointXY;
+	PointXY.x() = (x_min+x_max)/2.f;
+	PointXY.y() = (y_min+y_max)/2.f;
+
+	Eigen::Isometry2d buildingPose = Eigen::Isometry2d::Identity();
+	buildingPose.translation() = PointXY;
+
+	return buildingPose;
 }
 
 }

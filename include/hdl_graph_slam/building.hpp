@@ -6,19 +6,26 @@
 #include <Eigen/Dense>
 #include <pcl/io/pcd_io.h>
 
+namespace g2o {
+class VertexSE2;
+}	 // namespace g2o
+
 namespace hdl_graph_slam {
 
-using PointT3 = pcl::PointXYZ;
-
 class Building {
-	public:
-		typedef boost::shared_ptr<Building> Ptr;
-		std::string id;
-		std::map<std::string,std::string> tags;
-		pcl::PointCloud<PointT3>::Ptr geometry; // already interpolated and referred to zero utm
-		pcl::PointCloud<PointT3>::Ptr vertices;
-		Building(void);
+	typedef pcl::PointXYZ PointT;
+public:
+	typedef boost::shared_ptr<Building> Ptr;
+
+	Building(void);
+
+	std::string id;
+	Eigen::Isometry2d pose;					// pose (estimated by OpenStreetMap)
+	pcl::PointCloud<PointT>::Ptr cloud;
+
+	g2o::VertexSE2* node;  					// node instance
+
 };
 
-}
+}	 // namespace hdl_graph_slam
 #endif

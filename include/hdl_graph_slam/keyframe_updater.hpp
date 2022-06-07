@@ -19,7 +19,7 @@ public:
    * @brief constructor
    * @param pnh
    */
-  KeyframeUpdater(ros::NodeHandle& pnh) : is_first(true), prev_keypose(Eigen::Isometry3d::Identity()) {
+  KeyframeUpdater(ros::NodeHandle& pnh) : is_first(true), prev_keypose(Eigen::Isometry2d::Identity()) {
     keyframe_delta_trans = pnh.param<double>("keyframe_delta_trans", 2.0);
     keyframe_delta_angle = pnh.param<double>("keyframe_delta_angle", 2.0);
 
@@ -31,7 +31,7 @@ public:
    * @param pose  pose of the frame
    * @return  if true, the frame should be registered
    */
-  bool update(const Eigen::Isometry3d& pose) {
+  bool update(const Eigen::Isometry2d& pose) {
     // first frame is always registered to the graph
     if(is_first) {
       is_first = false;
@@ -40,9 +40,9 @@ public:
     }
 
     // calculate the delta transformation from the previous keyframe
-    Eigen::Isometry3d delta = prev_keypose.inverse() * pose;
+    Eigen::Isometry2d delta = prev_keypose.inverse() * pose;
     double dx = delta.translation().norm();
-    double da = Eigen::AngleAxisd(delta.linear()).angle();
+    double da = Eigen::Rotation2Dd(delta.linear()).angle();
 
     // too close to the previous frame
     if(dx < keyframe_delta_trans && da < keyframe_delta_angle) {
@@ -69,7 +69,7 @@ private:
 
   bool is_first;
   double accum_distance;
-  Eigen::Isometry3d prev_keypose;
+  Eigen::Isometry2d prev_keypose;
 };
 
 }  // namespace hdl_graph_slam

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: BSD-2-Clause
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 2.8.12)
 project(delta_graph_slam)
 set(EX_PROJECT_NAME "hdl_graph_slam")
 
@@ -74,7 +74,7 @@ generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 ###################################
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES hdl_graph_slam_nodelet
+  LIBRARIES delta_graph_slam_nodelet
   CATKIN_DEPENDS
     geometry_msgs
     message_runtime
@@ -96,17 +96,6 @@ include_directories(
 )
 
 # nodelets
-add_library(delta_graph_slam_nodelet 
-  apps/delta_graph_slam_nodelet.cpp
-  src/hdl_graph_slam/building.cpp
-  src/hdl_graph_slam/building_tools.cpp 
-  src/hdl_graph_slam/building_node.cpp
-)
-target_link_libraries(delta_graph_slam_nodelet
-  ${catkin_LIBRARIES}
-  curlpp
-)
-
 add_library(prefiltering_nodelet apps/prefiltering_nodelet.cpp)
 target_link_libraries(prefiltering_nodelet
   ${catkin_LIBRARIES}
@@ -133,16 +122,17 @@ target_link_libraries(scan_matching_odometry_nodelet
 add_dependencies(scan_matching_odometry_nodelet ${PROJECT_NAME}_gencpp)
 
 
-add_library(hdl_graph_slam_nodelet
-  apps/hdl_graph_slam_nodelet.cpp
+add_library(delta_graph_slam_nodelet 
+  apps/delta_graph_slam_nodelet.cpp
   src/hdl_graph_slam/graph_slam.cpp
   src/hdl_graph_slam/keyframe.cpp
-  src/hdl_graph_slam/map_cloud_generator.cpp
   src/hdl_graph_slam/registrations.cpp
   src/hdl_graph_slam/information_matrix_calculator.cpp
   src/g2o/robust_kernel_io.cpp
+  src/hdl_graph_slam/building.cpp
+  src/hdl_graph_slam/building_tools.cpp 
 )
-target_link_libraries(hdl_graph_slam_nodelet
+target_link_libraries(delta_graph_slam_nodelet
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
   ${G2O_TYPES_DATA}
@@ -153,8 +143,11 @@ target_link_libraries(hdl_graph_slam_nodelet
   ${G2O_SOLVER_CHOLMOD}   # be aware of that cholmod is released under GPL
   ${G2O_TYPES_SLAM3D}
   ${G2O_TYPES_SLAM3D_ADDONS}
+  ${G2O_TYPES_SLAM2D}
+  ${G2O_TYPES_SLAM2D_ADDONS}
+  curlpp
 )
-add_dependencies(hdl_graph_slam_nodelet ${PROJECT_NAME}_gencpp)
+add_dependencies(delta_graph_slam_nodelet ${PROJECT_NAME}_gencpp)
 
 catkin_install_python(
   PROGRAMS
@@ -172,7 +165,6 @@ install(TARGETS
   prefiltering_nodelet
   floor_detection_nodelet
   scan_matching_odometry_nodelet
-  hdl_graph_slam_nodelet
   delta_graph_slam_nodelet
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
 

@@ -9,6 +9,7 @@
 #include <hdl_graph_slam/building.hpp>
 #include <pcl/common/distances.h>
 #include <pcl/io/pcd_io.h>
+#include <pcl_conversions/pcl_conversions.h>
 #include <mutex>
 #include <fstream>
 #include <regex>
@@ -30,24 +31,29 @@ namespace hdl_graph_slam {
 template<typename ... Args>
 std::string string_format( const std::string& format, Args ... args )
 {
-    int size_s = std::snprintf( nullptr, 0, format.c_str(), args ... ) + 1; // Extra space for '\0'
-    if( size_s <= 0 ){ throw std::runtime_error( "Error during formatting." ); }
-    auto size = static_cast<size_t>( size_s );
-    std::unique_ptr<char[]> buf( new char[ size ] );
-    std::snprintf( buf.get(), size, format.c_str(), args ... );
-    return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
+	int size_s = std::snprintf( nullptr, 0, format.c_str(), args ... ) + 1; // Extra space for '\0'
+	if( size_s <= 0 ){ throw std::runtime_error( "Error during formatting." ); }
+	auto size = static_cast<size_t>( size_s );
+	std::unique_ptr<char[]> buf( new char[ size ] );
+	std::snprintf( buf.get(), size, format.c_str(), args ... );
+	return std::string( buf.get(), buf.get() + size - 1 ); // We don't want the '\0' inside
 }
+
+using PointT = pcl::PointXYZ;
 
 class BuildingTools {
 public:
 	typedef boost::shared_ptr<BuildingTools> Ptr;
 	BuildingTools() {}
-	BuildingTools(std::string host, Eigen::Vector2d zero_utm, double radius=40, double buffer_radius=60):
+	BuildingTools(std::string host, Eigen::Vector2d zero_utm, double radius=30, double buffer_radius=100):
 		host(host),
 		zero_utm(zero_utm),
 		radius(radius),
 		buffer_radius(buffer_radius) {}
 	std::vector<Building::Ptr> getBuildings(double lat, double lon);
+	std::vector<Building::Ptr> getBuildings(){ return buildings; };
+	std::vector<Building::Ptr> getBuildingNodes();
+	
 private:
 	struct Node {
 		std::string id;
@@ -62,17 +68,18 @@ private:
 	std::vector<Node> nodes;
 	pt::ptree xml_tree;
 	std::mutex xml_tree_mutex;
-    boost::thread async_handle;
+	boost::thread async_handle;
 	std::map<std::string,Building::Ptr> buildings_map;
 	std::vector<Building::Ptr> buildings;
+
 	void downloadBuildings(double lat, double lon);
-	void parseBuildings(double lat, double lon);
-	pcl::PointCloud<PointT3>::Ptr getVertices(std::vector<std::string> nd_refs);
-	pcl::PointCloud<PointT3>::Ptr buildPointCloud(std::vector<std::string> nd_refs);
+	std::vector<Building::Ptr> parseBuildings(double lat, double lon);
+	pcl::PointCloud<PointT>::Ptr buildPointCloud(std::vector<std::string> nd_refs);
 	Node getNode(std::string nd_ref);
-	pcl::PointCloud<PointT3>::Ptr interpolate(PointT3 a, PointT3 b);	
-	PointT3 toEnu(Eigen::Vector3d lla);
+	pcl::PointCloud<PointT>::Ptr interpolate(PointT a, PointT b);
+	PointT toEnu(Eigen::Vector3d lla);
 	bool isBuildingInRadius(pt::ptree::value_type &tree_node, double lat, double lon);
+	Eigen::Isometry2d getBuildingPose(std::vector<std::string> nd_refs);
 };
 
 }

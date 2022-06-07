@@ -27,7 +27,7 @@ namespace hdl_graph_slam {
 
 class PrefilteringNodelet : public nodelet::Nodelet {
 public:
-  typedef pcl::PointXYZI PointT;
+  typedef pcl::PointXYZ PointT;
 
   PrefilteringNodelet() {}
   virtual ~PrefilteringNodelet() {}
@@ -42,9 +42,11 @@ public:
       imu_sub = nh.subscribe("/imu/data", 1, &PrefilteringNodelet::imu_callback, this);
     }
 
-    points_sub = nh.subscribe("/velodyne_points", 64, &PrefilteringNodelet::cloud_callback, this);
+    points_topic = private_nh.param<std::string>("points_topic", "/velodyne_points");
+
+    points_sub = nh.subscribe(points_topic, 64, &PrefilteringNodelet::cloud_callback, this);
     points_pub = nh.advertise<sensor_msgs::PointCloud2>("/filtered_points", 32);
-    flat_points_pub = nh.advertise<sensor_msgs::PointCloud2>("/filtered_flat_points", 32);
+    flat_points_pub = nh.advertise<sensor_msgs::PointCloud2>("/flat_filtered_points", 32);
     colored_pub = nh.advertise<sensor_msgs::PointCloud2>("/colored_points", 32);
   }
 
@@ -107,9 +109,6 @@ private:
 
   void cloud_callback(const pcl::PointCloud<PointT>& src_cloud_r) {
 
-    ros::WallTime start_, end_;
-    start_ = ros::WallTime::now();
-
     pcl::PointCloud<PointT>::ConstPtr src_cloud = src_cloud_r.makeShared();
     if(src_cloud->empty()) {
       return;
@@ -143,14 +142,9 @@ private:
     filtered = height_filtering(filtered);
     filtered = normal_filtering(filtered);
     filtered = flatten(filtered);
-    filtered = outlier_removal(filtered);
+    // filtered = downsample(filtered);
 
     flat_points_pub.publish(*filtered);
-
-    end_ = ros::WallTime::now();
-    // print results
-    double execution_time = (end_ - start_).toNSec() * 1e-6;
-    ROS_INFO_STREAM("Exectution time (ms): " << execution_time);
   }
 
   pcl::PointCloud<PointT>::ConstPtr flatten(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
@@ -174,18 +168,18 @@ private:
   }
 
       /**
-   * @brief filter points with negative y
+   * @brief filter points below lidar height
    * @param cloud  input cloud
    * @return filtered cloud
    */
   pcl::PointCloud<PointT>::Ptr height_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+    double lidar_height = private_nh.param<double>("lidar_height", 0);
 
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
     filtered->reserve(cloud->size());
 
-    float normal_filter_thresh = 0.2f;
     for(int i = 0; i < cloud->size(); i++) {
-      if(cloud->at(i).z > 0) {
+      if(cloud->at(i).z > lidar_height) {
         filtered->push_back(cloud->at(i));
       }
     }
@@ -348,6 +342,8 @@ private:
 
   ros::Subscriber imu_sub;
   std::vector<sensor_msgs::ImuConstPtr> imu_queue;
+
+  std::string points_topic;
 
   ros::Subscriber points_sub;
   ros::Publisher points_pub;
