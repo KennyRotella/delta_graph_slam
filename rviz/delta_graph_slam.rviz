@@ -4,9 +4,7 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /Global Options1
-        - /Status1
-        - /Grid1
+        - /TF1/Frames1
         - /MarkerArray1/Namespaces1
       Splitter Ratio: 0.5
     Tree Height: 667
@@ -28,7 +26,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: ""
+    SyncSource: FlattenedCloud
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -58,15 +56,17 @@ Visualization Manager:
       Enabled: true
       Frame Timeout: 50
       Frames:
-        All Enabled: true
+        All Enabled: false
         base_link:
+          Value: true
+        keyframe:
           Value: true
         map:
           Value: true
         odom:
           Value: true
         velo_link:
-          Value: true
+          Value: false
       Marker Scale: 1
       Name: TF
       Show Arrows: true
@@ -75,7 +75,11 @@ Visualization Manager:
       Tree:
         map:
           odom:
-            {}
+            base_link:
+              velo_link:
+                {}
+            keyframe:
+              {}
       Update Interval: 0
       Value: true
     - Alpha: 0.20000000298023224
@@ -231,7 +235,10 @@ Visualization Manager:
       Marker Topic: /delta_graph_slam/markers
       Name: MarkerArray
       Namespaces:
-        {}
+        edges: true
+        gps: true
+        keyframe_nodes: true
+        loop_close_radius: true
       Queue Size: 100
       Value: true
   Enabled: true
@@ -271,7 +278,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 11.836923599243164
+      Scale: 10
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
       X: 0

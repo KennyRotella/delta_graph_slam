@@ -19,7 +19,7 @@
   <arg name="robot_odom_frame_id" default="robot_odom" />
 
   <!-- transformation between lidar and base_link -->
-  <node pkg="tf" type="static_transform_publisher" name="base2lidar_publisher" args="0 0 0 0 0 0 base_link velo_link 10" />
+  <node pkg="tf" type="static_transform_publisher" name="base2lidar_publisher" args="0 0 1.73 0 0 0 base_link velo_link 100" />
 
   <!-- in case you use velodyne_driver, comment out the following line -->
   <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen"/>
@@ -42,7 +42,7 @@
     <param name="statistical_stddev" value="1.2" />
     <param name="radius_radius" value="0.5" />
     <param name="radius_min_neighbors" value="2" />
-    <param name="lidar_height" value="0" />
+    <param name="lidar_height" value="1.73" />
   </node>
 
   <!-- scan_matching_odometry_nodelet -->
