@@ -101,6 +101,7 @@ private:
     distance_far_thresh = private_nh.param<double>("distance_far_thresh", 100.0);
 
     base_link_frame = private_nh.param<std::string>("base_link_frame", "");
+    lidar_height = private_nh.param<float>("lidar_height", 0);
   }
 
   void imu_callback(const sensor_msgs::ImuConstPtr& imu_msg) {
@@ -139,7 +140,7 @@ private:
 
     points_pub.publish(*filtered);
 
-    filtered = height_filtering(filtered);
+    // filtered = height_filtering(filtered);
     filtered = normal_filtering(filtered);
     filtered = flatten(filtered);
     // filtered = downsample(filtered);
@@ -173,8 +174,7 @@ private:
    * @return filtered cloud
    */
   pcl::PointCloud<PointT>::Ptr height_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
-    double lidar_height = private_nh.param<double>("lidar_height", 0);
-
+    
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
     filtered->reserve(cloud->size());
 
@@ -206,8 +206,8 @@ private:
 
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
     ne.setKSearch(10);
-    float sensor_height = 1.73f;
-    ne.setViewPoint(0.0f, 0.0f, sensor_height);
+
+    ne.setViewPoint(0.0f, 0.0f, lidar_height);
     ne.compute(*normals);
 
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
@@ -355,6 +355,7 @@ private:
   tf::TransformListener tf_listener;
 
   std::string base_link_frame;
+  float lidar_height;
 
   bool use_distance_filter;
   double distance_near_thresh;
