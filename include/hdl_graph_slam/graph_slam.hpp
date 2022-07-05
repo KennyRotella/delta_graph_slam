@@ -18,9 +18,11 @@ class EdgeSE2;
 class EdgeSE3Plane;
 class EdgeSE3PointXYZ;
 class EdgeSE3PriorXY;
+class EdgeSE2PriorXY;
 class EdgeSE3PriorXYZ;
 class EdgeSE3PriorVec;
 class EdgeSE3PriorQuat;
+class EdgeSE2PriorQuat;
 class EdgePlane;
 class EdgePlaneIdentity;
 class EdgePlaneParallel;
@@ -123,6 +125,10 @@ public:
   g2o::VertexSE2* add_se2_node(const Eigen::Isometry2d& pose);
 
   g2o::EdgeSE2* add_se2_edge(g2o::VertexSE2* v1, g2o::VertexSE2* v2, const Eigen::Isometry2d& relative_pose, const Eigen::MatrixXd& information_matrix);
+
+  g2o::EdgeSE2PriorXY* add_se2_prior_xy_edge(g2o::VertexSE2* v_se2, const Eigen::Vector2d& xy, const Eigen::MatrixXd& information_matrix);
+
+  g2o::EdgeSE2PriorQuat* add_se2_prior_quat_edge(g2o::VertexSE2* v_se3, const Eigen::Rotation2Dd& quat, const Eigen::MatrixXd& information_matrix);
 
   void add_robust_kernel(g2o::HyperGraph::Edge* edge, const std::string& kernel_type, double kernel_size);
 

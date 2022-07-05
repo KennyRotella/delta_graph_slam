@@ -228,6 +228,10 @@ bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, d
 	return false;
 }
 
+/**
+ * @brief this method computes the building position using its middle point
+ * @return isometry2d with null orientation
+ */
 Eigen::Isometry2d BuildingTools::getBuildingPose(std::vector<std::string> nd_refs){
 	float x_min = std::numeric_limits<float>::max();
 	float x_max = std::numeric_limits<float>::lowest();

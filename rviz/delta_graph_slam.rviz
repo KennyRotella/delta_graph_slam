@@ -126,14 +126,14 @@ Visualization Manager:
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
-      Name: TransBuildingsCloud
+      Name: TargetBuildingsCloud
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.05000000074505806
+      Size (m): 0.10000000149011612
       Style: Flat Squares
-      Topic: /delta_graph_slam/trans_buildings_cloud
+      Topic: /delta_graph_slam/target_buildings_cloud
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: false
@@ -235,8 +235,8 @@ Visualization Manager:
       Marker Topic: /delta_graph_slam/markers
       Name: MarkerArray
       Namespaces:
+        building_nodes: true
         edges: true
-        gps: true
         keyframe_nodes: true
         loop_close_radius: true
       Queue Size: 100
@@ -278,7 +278,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 10
+      Scale: 12.543999671936035
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
       X: 0

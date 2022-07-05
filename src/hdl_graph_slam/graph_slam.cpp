@@ -18,9 +18,11 @@
 #include <g2o/types/slam3d_addons/types_slam3d_addons.h>
 #include <g2o/edge_se3_plane.hpp>
 #include <g2o/edge_se3_priorxy.hpp>
+#include <g2o/edge_se2_priorxy.hpp>
 #include <g2o/edge_se3_priorxyz.hpp>
 #include <g2o/edge_se3_priorvec.hpp>
 #include <g2o/edge_se3_priorquat.hpp>
+#include <g2o/edge_se2_priorquat.hpp>
 #include <g2o/edge_plane_prior.hpp>
 #include <g2o/edge_plane_identity.hpp>
 #include <g2o/edge_plane_parallel.hpp>
@@ -36,6 +38,8 @@ G2O_REGISTER_TYPE(EDGE_SE3_PRIORXY, EdgeSE3PriorXY)
 G2O_REGISTER_TYPE(EDGE_SE3_PRIORXYZ, EdgeSE3PriorXYZ)
 G2O_REGISTER_TYPE(EDGE_SE3_PRIORVEC, EdgeSE3PriorVec)
 G2O_REGISTER_TYPE(EDGE_SE3_PRIORQUAT, EdgeSE3PriorQuat)
+G2O_REGISTER_TYPE(EDGE_SE2_PRIORQUAT, EdgeSE2PriorQuat)
+G2O_REGISTER_TYPE(EDGE_SE2_PriorXY, EdgeSE2PriorXY)
 G2O_REGISTER_TYPE(EDGE_PLANE_PRIOR_NORMAL, EdgePlanePriorNormal)
 G2O_REGISTER_TYPE(EDGE_PLANE_PRIOR_DISTANCE, EdgePlanePriorDistance)
 G2O_REGISTER_TYPE(EDGE_PLANE_IDENTITY, EdgePlaneIdentity)
@@ -292,6 +296,27 @@ g2o::EdgeSE2* GraphSLAM::add_se2_edge(g2o::VertexSE2* v1, g2o::VertexSE2* v2, co
 
   return edge;
 }
+
+g2o::EdgeSE2PriorXY* GraphSLAM::add_se2_prior_xy_edge(g2o::VertexSE2* v_se2, const Eigen::Vector2d& xy, const Eigen::MatrixXd& information_matrix) {
+  g2o::EdgeSE2PriorXY* edge(new g2o::EdgeSE2PriorXY());
+  edge->setMeasurement(xy);
+  edge->setInformation(information_matrix);
+  edge->vertices()[0] = v_se2;
+  graph->addEdge(edge);
+
+  return edge;
+}
+
+g2o::EdgeSE2PriorQuat* GraphSLAM::add_se2_prior_quat_edge(g2o::VertexSE2* v_se2, const Eigen::Rotation2Dd& rot, const Eigen::MatrixXd& information_matrix) {
+  g2o::EdgeSE2PriorQuat* edge(new g2o::EdgeSE2PriorQuat());
+  edge->setMeasurement(rot);
+  edge->setInformation(information_matrix);
+  edge->vertices()[0] = v_se2;
+  graph->addEdge(edge);
+
+  return edge;
+}
+
 
 void GraphSLAM::add_robust_kernel(g2o::HyperGraph::Edge* edge, const std::string& kernel_type, double kernel_size) {
   if(kernel_type == "NONE") {

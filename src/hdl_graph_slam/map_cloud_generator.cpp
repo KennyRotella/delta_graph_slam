@@ -24,7 +24,6 @@ pcl::PointCloud<MapCloudGenerator::PointT>::Ptr MapCloudGenerator::generate(cons
     for(const auto& src_pt : keyframe->cloud->points) {
       PointT dst_pt;
       dst_pt.getVector4fMap() = pose * src_pt.getVector4fMap();
-      dst_pt.intensity = src_pt.intensity;
       cloud->push_back(dst_pt);
     }
   }

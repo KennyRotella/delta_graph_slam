@@ -124,7 +124,7 @@ private:
       }
 
       tf::StampedTransform transform;
-      tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(2.0));
+      tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(5.0));
       tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
 
       pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
@@ -140,10 +140,9 @@ private:
 
     points_pub.publish(*filtered);
 
-    // filtered = height_filtering(filtered);
+    filtered = height_filtering(filtered);
     filtered = normal_filtering(filtered);
     filtered = flatten(filtered);
-    // filtered = downsample(filtered);
 
     flat_points_pub.publish(*filtered);
   }

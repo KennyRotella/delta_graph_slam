@@ -13,9 +13,12 @@
 #include <tf2_ros/transform_listener.h>
 
 #include <nav_msgs/Odometry.h>
-#include <sensor_msgs/NavSatFix.h>
 #include <sensor_msgs/PointCloud2.h>
-#include <geographic_msgs/GeoPoint.h>
+#include <sensor_msgs/NavSatFix.h>
+#include <geographic_msgs/GeoPointStamped.h>
+#include <nmea_msgs/Sentence.h>
+
+#include <delta_graph_slam/SaveMap.h>
 
 #include <nodelet/nodelet.h>
 #include <pluginlib/class_list_macros.h>
@@ -30,13 +33,14 @@
 #include <hdl_graph_slam/loop_detector.hpp>
 #include <hdl_graph_slam/information_matrix_calculator.hpp>
 #include <hdl_graph_slam/building_tools.hpp>
+#include <hdl_graph_slam/map_cloud_generator.hpp>
+#include <hdl_graph_slam/nmea_sentence_parser.hpp>
 #include <fast_gicp/gicp/fast_gicp.hpp>
 
 #include <g2o/types/slam2d/edge_se2.h>
 #include <g2o/types/slam2d/vertex_se2.h>
-#include <g2o/edge_se3_plane.hpp>
-#include <g2o/edge_se3_priorxy.hpp>
-#include <g2o/edge_se3_priorxyz.hpp>
+#include <g2o/edge_se2_priorxy.hpp>
+#include <g2o/edge_se2_priorquat.hpp>
 
 namespace hdl_graph_slam {
 
@@ -62,7 +66,12 @@ public:
     graph_slam.reset(new GraphSLAM(private_nh.param<std::string>("g2o_solver_type", "lm_var")));
     keyframe_updater.reset(new KeyframeUpdater(private_nh));
     loop_detector.reset(new LoopDetector(private_nh));
+    map_cloud_generator.reset(new MapCloudGenerator());
     inf_calclator.reset(new InformationMatrixCalculator(private_nh));
+    nmea_parser.reset(new NmeaSentenceParser());
+
+    gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
+    gps_edge_stddev_xy = private_nh.param<double>("gps_edge_stddev_xy", 10000.0);
 
     points_topic = private_nh.param<std::string>("points_topic", "/velodyne_points");
 
@@ -72,15 +81,22 @@ public:
     flat_cloud_sub.reset(new message_filters::Subscriber<sensor_msgs::PointCloud2>(mt_nh, "/flat_filtered_points", 32));
     sync.reset(new message_filters::Synchronizer<ApproxSyncPolicy>(ApproxSyncPolicy(32), *odom_sub, *cloud_sub, *flat_cloud_sub));
     sync->registerCallback(boost::bind(&DeltaGraphSlamNodelet::cloud_callback, this, _1, _2, _3));
-    navsat_sub = mt_nh.subscribe("/gps/navsat", 1, &DeltaGraphSlamNodelet::navsat_callback, this); 
+
+    if(private_nh.param<bool>("enable_gps", true)) {
+      gps_sub = mt_nh.subscribe("/gps/geopoint", 1024, &DeltaGraphSlamNodelet::gps_callback, this);
+      nmea_sub = mt_nh.subscribe("/gpsimu_driver/nmea_sentence", 1024, &DeltaGraphSlamNodelet::nmea_callback, this);
+      navsat_sub = mt_nh.subscribe("/gps/navsat", 1024, &DeltaGraphSlamNodelet::navsat_callback, this);
+    }
     
     // publishers
     buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/buildings_cloud", 16);
-    trans_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/trans_buildings_cloud", 16);
+    target_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/target_buildings_cloud", 16);
     aligned_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/aligned_cloud", 16);
     markers_pub = mt_nh.advertise<visualization_msgs::MarkerArray>("/delta_graph_slam/markers", 16);
     odom2map_pub = mt_nh.advertise<geometry_msgs::TransformStamped>("/delta_graph_slam/odom2pub", 16);
     read_until_pub = mt_nh.advertise<std_msgs::Header>("/delta_graph_slam/read_until", 32);
+
+    save_map_service_server = mt_nh.advertiseService("/delta_graph_slam/save_map", &DeltaGraphSlamNodelet::save_map_service, this);
 
     double graph_update_interval = private_nh.param<double>("graph_update_interval", 3.0);
     optimization_timer = mt_nh.createWallTimer(ros::WallDuration(graph_update_interval), &DeltaGraphSlamNodelet::optimization_timer_callback, this);
@@ -88,13 +104,14 @@ public:
     registration.reset(new fast_gicp::FastGICP<PointT, PointT>());
     registration->setNumThreads(private_nh.param<int>("delta_num_threads", 0));
     registration->setMaximumIterations(private_nh.param<int>("delta_maximum_iterations", 128));
-    registration->setMaxCorrespondenceDistance(private_nh.param<double>("delta_max_correspondece_distance", 2.0));
+    registration->setMaxCorrespondenceDistance(private_nh.param<double>("delta_max_correspondence_distance", 4.0));
+    registration->setTransformationEpsilon(private_nh.param<double>("delta_transformation_epsilon", 0.001));
     registration->setDebugPrint(private_nh.param<bool>("delta_debug_print", true));
 
-    // correct initial pose
-    Eigen::Rotation2Df rot(-M_PI*(private_nh.param<float>("delta_init_angle", 31.0f)/180.0f));
+    // adjust initial orientation
+    Eigen::Rotation2Df rot(M_PI*(private_nh.param<float>("delta_init_angle", -31.0f)/180.0f));
     Eigen::Isometry2f trans = Eigen::Isometry2f::Identity();
-    trans(0,2) = private_nh.param<float>("delta_init_x", 1.0f);
+    trans(0,2) = private_nh.param<float>("delta_init_x", 0.0f);
     trans(1,2) = private_nh.param<float>("delta_init_y", 0.0f);
     trans.linear() = rot.toRotationMatrix();
 
@@ -117,69 +134,18 @@ private:
   void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg, 
                       const sensor_msgs::PointCloud2::ConstPtr& cloud_msg, 
                       const sensor_msgs::PointCloud2::ConstPtr& flat_cloud_msg) {
+                        
+    if(!buildings_manager){
+      ROS_WARN("Buildings manager not initialized yet!");
+      return;
+    }
 
     const ros::Time& stamp = cloud_msg->header.stamp;
     Eigen::Isometry3d odom = odom2isometry(odom_msg);
     Eigen::Isometry2d odom2D(transform3Dto2D(odom.matrix().cast<float>()).cast<double>());
 
-    pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
-    pcl::fromROSMsg(*cloud_msg, *cloud);
     if(base_frame_id.empty()) {
       base_frame_id = cloud_msg->header.frame_id;
-    }
-
-    pcl::PointCloud<PointT>::Ptr flat_cloud(new pcl::PointCloud<PointT>());
-    pcl::fromROSMsg(*flat_cloud_msg, *flat_cloud);
-    if(base_frame_id.empty()) {
-      base_frame_id = flat_cloud_msg->header.frame_id;
-    }
-
-    Eigen::Matrix3f map_pose = trans_odom2map*odom2D.matrix().cast<float>();
-
-    // transforming keyframe's odom (ENU) coordinates into UTM coordinates 
-    geodesy::UTMPoint utm;
-    utm.easting   = zero_utm->x() + map_pose(0,2);
-    utm.northing  = zero_utm->y() + map_pose(1,2);
-    utm.altitude  = 0;
-    utm.zone = zero_utm_zone;
-    utm.band = zero_utm_band;
-
-    // convert from utm to lla
-    geographic_msgs::GeoPoint lla = geodesy::toMsg(utm); 
-
-    // download and parse buildings
-    std::vector<Building::Ptr> buildings; 
-    buildings = buildings_manager->getBuildings(lla.latitude, lla.longitude);
-
-    // skip keyframe if there are no buildings within radius
-    if(!buildings.empty()){
-      
-      // buildings_cloud contains all buildings' cloud
-      pcl::PointCloud<PointT>::Ptr buildings_cloud(new pcl::PointCloud<PointT>);
-      buildings_cloud->header.frame_id = "map";
-      for(Building::Ptr building : buildings){
-        *(buildings_cloud) += *(building->cloud);
-      }
-
-      // building cloud transformed in velo_link frame
-      pcl::PointCloud<PointT>::Ptr trans_buildings_cloud(new pcl::PointCloud<PointT>);
-      trans_odom2map_mutex.lock();
-      pcl::transformPointCloud(*buildings_cloud, *trans_buildings_cloud, transform2Dto3D(map_pose.inverse()));
-      trans_odom2map_mutex.unlock();
-
-      trans_buildings_cloud->header = flat_cloud->header;
-      trans_buildings_pub.publish(*trans_buildings_cloud);
-
-      registration->setInputSource(flat_cloud);
-      registration->setInputTarget(trans_buildings_cloud);
-
-      pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-      registration->align(*aligned);
-      Eigen::Matrix4f finalTransformation = registration->getFinalTransformation();
-      Eigen::Isometry2d transformation(transform3Dto2D(finalTransformation).cast<double>());
-
-      aligned->header = flat_cloud->header;
-      aligned_pub.publish(*aligned);
     }
 
     if(!keyframe_updater->update(odom2D)) {
@@ -195,11 +161,187 @@ private:
       return;
     }
 
+    pcl::PointCloud<PointT>::Ptr cloud(new pcl::PointCloud<PointT>());
+    pcl::fromROSMsg(*cloud_msg, *cloud);
+
+    pcl::PointCloud<PointT>::Ptr flat_cloud(new pcl::PointCloud<PointT>());
+    pcl::fromROSMsg(*flat_cloud_msg, *flat_cloud);
+
+    trans_odom2map_mutex.lock();
+    Eigen::Isometry2d odom2map(trans_odom2map.cast<double>());
+    trans_odom2map_mutex.unlock();
+
+    Eigen::Isometry2d map_pose = odom2map * odom2D;
+
+    // transforming keyframe's odom (ENU) coordinates into UTM coordinates 
+    geodesy::UTMPoint utm;
+    utm.easting   = zero_utm->x() + map_pose(0,2);
+    utm.northing  = zero_utm->y() + map_pose(1,2);
+    utm.altitude  = 0;
+    utm.zone = zero_utm_zone;
+    utm.band = zero_utm_band;
+
+    // convert from utm to lla
+    geographic_msgs::GeoPoint lla = geodesy::toMsg(utm); 
+
+    // download and parse buildings
+    std::vector<Building::Ptr> buildings;
+     
+    buildings = buildings_manager->getBuildings(lla.latitude, lla.longitude);
+    Eigen::Isometry2d alignTrans_flatCloud_to_buildCloud;
+    pcl::PointCloud<PointT>::Ptr trans_buildings_cloud(new pcl::PointCloud<PointT>);
+
+    // skip keyframe if there are no buildings within radius
+    if(!buildings.empty()){
+      
+      // buildings_cloud contains all buildings' cloud
+      pcl::PointCloud<PointT>::Ptr buildings_cloud(new pcl::PointCloud<PointT>);
+      buildings_cloud->header.frame_id = "map";
+      for(Building::Ptr building : buildings){
+        *(buildings_cloud) += *(building->cloud);
+      }
+
+      target_buildings_pub.publish(*buildings_cloud);
+
+      // building cloud transformed in velo_link frame
+      pcl::transformPointCloud(*buildings_cloud, *trans_buildings_cloud, transform2Dto3D(map_pose.inverse().matrix().cast<float>()));
+      trans_buildings_cloud->header = flat_cloud->header;
+
+      registration->setInputSource(flat_cloud);
+      registration->setInputTarget(trans_buildings_cloud);
+
+      pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
+      registration->align(*aligned);
+      Eigen::Matrix4f alignTrans_flatCloud_to_buildCloud3D = registration->getFinalTransformation();
+      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(alignTrans_flatCloud_to_buildCloud3D).cast<double>();
+
+      aligned->header = flat_cloud->header;
+      aligned_pub.publish(*aligned);
+
+      // double weight = inf_calclator->calc_fitness_score_buildings(flat_cloud, trans_buildings_cloud, Eigen::Isometry3d(alignTrans_flatCloud_to_buildCloud3D.cast<double>()).inverse());
+      // std::cout << "FITNESS: " << registration->getFitnessScore() << std::endl;
+      // std::cout << "SCORE: " << weight << std::endl;
+    }
+
     double accum_d = keyframe_updater->get_accum_distance();
-    KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, accum_d, cloud, flat_cloud));
+    KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, alignTrans_flatCloud_to_buildCloud, accum_d, cloud, flat_cloud, trans_buildings_cloud, buildings));
 
     std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
     keyframe_queue.push_back(keyframe);
+  }
+
+  void nmea_callback(const nmea_msgs::SentenceConstPtr& nmea_msg) {
+    GPRMC grmc = nmea_parser->parse(nmea_msg->sentence);
+
+    if(grmc.status != 'A') {
+      return;
+    }
+
+    geographic_msgs::GeoPointStampedPtr gps_msg(new geographic_msgs::GeoPointStamped());
+    gps_msg->header = nmea_msg->header;
+    gps_msg->position.latitude = grmc.latitude;
+    gps_msg->position.longitude = grmc.longitude;
+    gps_msg->position.altitude = NAN;
+
+    gps_callback(gps_msg);
+  }
+
+  void navsat_callback(const sensor_msgs::NavSatFixConstPtr& navsat_msg) {
+    geographic_msgs::GeoPointStampedPtr gps_msg(new geographic_msgs::GeoPointStamped());
+    gps_msg->header = navsat_msg->header;
+    gps_msg->position.latitude = navsat_msg->latitude;
+    gps_msg->position.longitude = navsat_msg->longitude;
+    gps_msg->position.altitude = navsat_msg->altitude;
+    gps_callback(gps_msg);
+  }
+
+  /**
+   * @brief received gps data is added to #gps_queue
+   * @param gps_msg
+   */
+  void gps_callback(const geographic_msgs::GeoPointStampedPtr& gps_msg) {
+    gps_msg->header.stamp += ros::Duration(gps_time_offset);
+
+    // convert (latitude, longitude, altitude) -> (easting, northing, altitude) in UTM coordinate
+    geodesy::UTMPoint utm;
+    geodesy::fromMsg(gps_msg->position, utm);
+    Eigen::Vector2d xy(utm.easting, utm.northing);
+
+    // the first gps data position will be the origin of the map
+    if(!zero_utm) {
+      zero_utm = xy;
+      // zone and band are used later to convert utm coords to lla 
+      // (needed later to download buildings)
+      zero_utm_zone = utm.zone;
+      zero_utm_band = utm.band;
+
+      // fetch buildings as soon as possible
+      buildings_manager.reset(new BuildingTools("https://overpass-api.de", *zero_utm));
+      buildings_manager->getBuildings(gps_msg->position.latitude, gps_msg->position.longitude);
+    }
+    
+    std::lock_guard<std::mutex> lock(gps_queue_mutex);
+    gps_queue.push_back(gps_msg);
+  }
+
+  bool flush_gps_queue() {
+    std::lock_guard<std::mutex> lock(gps_queue_mutex);
+
+    if(keyframes.empty() || gps_queue.empty()) {
+      return false;
+    }
+
+    bool updated = false;
+    auto gps_cursor = gps_queue.begin();
+
+    for(auto& keyframe : keyframes) {
+      if(keyframe->stamp > gps_queue.back()->header.stamp) {
+        break;
+      }
+
+      if(keyframe->stamp < (*gps_cursor)->header.stamp || keyframe->utm_coord) {
+        continue;
+      }
+
+      // find the gps data which is closest to the keyframe
+      auto closest_gps = gps_cursor;
+      for(auto gps = gps_cursor; gps != gps_queue.end(); gps++) {
+        auto dt = ((*closest_gps)->header.stamp - keyframe->stamp).toSec();
+        auto dt2 = ((*gps)->header.stamp - keyframe->stamp).toSec();
+        if(std::abs(dt) < std::abs(dt2)) {
+          break;
+        }
+
+        closest_gps = gps;
+      }
+
+      // if the time residual between the gps and keyframe is too large, skip it
+      gps_cursor = closest_gps;
+      if(0.1 < std::abs(((*closest_gps)->header.stamp - keyframe->stamp).toSec())) {
+        continue;
+      }
+
+      // convert (latitude, longitude, altitude) -> (easting, northing, altitude) in UTM coordinate
+      geodesy::UTMPoint utm;
+      geodesy::fromMsg((*closest_gps)->position, utm);
+      Eigen::Vector2d xy(utm.easting, utm.northing);
+      xy -= (*zero_utm);
+
+      keyframe->utm_coord = xy;
+
+      if(private_nh.param<bool>("delta_enable_gps_priors", false)) {
+        g2o::OptimizableGraph::Edge* edge;
+        Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / gps_edge_stddev_xy;
+        edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, xy, information_matrix);
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("gps_edge_robust_kernel", "NONE"), private_nh.param<double>("gps_edge_robust_kernel_size", 1.0));
+
+        updated = true;
+      }
+    }
+
+    auto remove_loc = std::upper_bound(gps_queue.begin(), gps_queue.end(), keyframes.back()->stamp, [=](const ros::Time& stamp, const geographic_msgs::GeoPointStampedConstPtr& geopoint) { return stamp < geopoint->header.stamp; });
+    gps_queue.erase(gps_queue.begin(), remove_loc);
+    return updated;
   }
 
   /**
@@ -261,78 +403,69 @@ private:
       graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("odometry_edge_robust_kernel", "NONE"), private_nh.param<double>("odometry_edge_robust_kernel_size", 1.0));
     }
 
-    // std_msgs::Header read_until;
-    // read_until.stamp = keyframe_queue[num_processed]->stamp + ros::Duration(10, 0);
-    // read_until.frame_id = points_topic;
-    // read_until_pub.publish(read_until);
-    // read_until.frame_id = "/filtered_points";
-    // read_until_pub.publish(read_until);
-
     keyframe_queue.erase(keyframe_queue.begin(), keyframe_queue.begin() + num_processed + 1);
     return true;
   }
 
-  void update_building_nodes() {
-    if(!buildings_manager) {
-      return;
+  bool update_building_nodes() {
+
+    if(new_keyframes.empty()) {
+      return false;
     }
 
+    bool updated = false;
+    trans_odom2map_mutex.lock();
+    Eigen::Isometry2d odom2map(trans_odom2map.cast<double>());
+    trans_odom2map_mutex.unlock();
+
     for(auto& keyframe : new_keyframes) {
-      // transforming keyframe's odom (ENU) coordinates into UTM coordinates 
-      geodesy::UTMPoint utm;
-      utm.easting   = zero_utm->x() + keyframe->odom2D.translation().x();
-      utm.northing  = zero_utm->y() + keyframe->odom2D.translation().y();
-      utm.altitude  = 0;
-      utm.zone = zero_utm_zone;
-      utm.band = zero_utm_band;
+      Eigen::Isometry3d relative_pose3D(transform2Dto3D(keyframe->alignTrans_flatCloud_to_buildCloud.matrix().cast<float>()).cast<double>());
+      Eigen::MatrixXd information = inf_calclator->calc_information_matrix_buildings(keyframe->flat_cloud, keyframe->buildings_cloud, relative_pose3D.inverse());
 
-      // convert from utm to lla
-      geographic_msgs::GeoPoint lla = geodesy::toMsg(utm); 
+      Eigen::Isometry2d odom = odom2map * keyframe->odom2D;
+      Eigen::Isometry2d estimated_odom = odom * keyframe->alignTrans_flatCloud_to_buildCloud;
 
-      // download and parse buildings
-      std::vector<Building::Ptr> buildings; 
-      buildings = buildings_manager->getBuildings(lla.latitude, lla.longitude);
+      // Eigen::Vector2d A = odom.translation();
+      // Eigen::Vector2d B = estimated_odom.translation();
 
-      // skip keyframe if there are no buildings within radius
-      if(buildings.empty()){
-        continue;
-      }
+      // double dot = A.x()*B.x() + A.y()*B.y(); // dot product between A and B
+      // double det = A.x()*B.y() - A.y()*B.x(); // determinant
+      // double angle = std::atan2(det, dot);    // atan2(y, x) or atan2(sin, cos)
 
-      // buildings_cloud contains all buildings' cloud
-      pcl::PointCloud<PointT>::Ptr buildings_cloud(new pcl::PointCloud<PointT>);
-      for(Building::Ptr building : buildings){
-        *(buildings_cloud) += *(building->cloud);
-      }
-
-      // lidar cloud transformed into odom frame
-      // pcl::PointCloud<PointT>::Ptr odom_cloud(new pcl::PointCloud<PointT>);
-      // pcl::transformPointCloud(*(keyframe->flat_cloud), *odom_cloud, keyframe->odom.matrix());
-
-      registration->setInputSource(keyframe->flat_cloud);
-      registration->setInputTarget(buildings_cloud);
-
-      pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-      registration->align(*aligned);
-      Eigen::Isometry2d transformation(transform3Dto2D(registration->getFinalTransformation()).cast<double>());
-
-      aligned->header.stamp = ros::Time::now().nsec/1000;
-      aligned->header.frame_id = "map";
-      aligned_pub.publish(*aligned);
-      
-      for(Building::Ptr building : buildings){
+      // double weight = inf_calclator->calc_fitness_score_buildings(keyframe->flat_cloud, keyframe->buildings_cloud, relative_pose3D.inverse(), 10.f);
+      // weight = weight > 0.01 ? 1.0 / weight : 100;
+      // weighted average between initial orientation estimations
+      // initial_orientation = initial_orientation * weight_estimates + (angle + Eigen::Rotation2Dd(odom2map.linear()).angle()) * weight;
+      // weight_estimates += weight;
+      // initial_orientation /= weight_estimates;
+      // std::cout << information << std::endl;
+      // std::cout << weight << std::endl;
+      // std::cout << initial_orientation * (180.f / M_PI) << std::endl;
+      // std::cout << angle * (180.f / M_PI) << std::endl;
+    
+      for(Building::Ptr building : keyframe->near_buildings){
         if(building->node == nullptr){
           building->node = graph_slam->add_se2_node(building->pose);
           building->node->setFixed(true);
         }
 
-        Eigen::MatrixXd information = Eigen::MatrixXd::Identity(3, 3);
+        // TODO: local alignment
 
         // transformation from estimated keyframe pose to building pose
-        Eigen::Isometry2d blding_to_kf_trans = building->pose.inverse() * keyframe->odom2D;
+        // Eigen::Isometry2d kf_to_blding_trans = estimated_odom.inverse() * building->pose;
 
-        // auto edge = graph_slam->add_se2_edge(keyframe->node, building->node, blding_to_kf_trans, information);
+        // g2o::OptimizableGraph::Edge* edge;
+        // edge = graph_slam->add_se2_edge(keyframe->node, building->node, kf_to_blding_trans, information);
         // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
       }
+      g2o::OptimizableGraph::Edge* edge;
+      edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+
+      edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+
+      updated = true;
     }
 
     std_msgs::Header read_until;
@@ -341,6 +474,7 @@ private:
     read_until_pub.publish(read_until);
     read_until.frame_id = "/filtered_points";
     read_until_pub.publish(read_until);
+    return updated;
   }
 
   /**
@@ -354,7 +488,7 @@ private:
       return;
     }
 
-    // download and parse buildings
+    // download all parsed buildings so far
     std::vector<Building::Ptr> new_buildings = buildings_manager->getBuildings();
 
     // create pointcloud of all buildings
@@ -369,36 +503,6 @@ private:
     buildingsCloud_msg->header.frame_id = "map";
     buildingsCloud_msg->header.stamp = ros::Time::now();
     buildings_pub.publish(buildingsCloud_msg);
-  }
-
-  /**
-   * @brief callback to store zero_utm and visualize gps positions
-   * @param navsat_msg
-   * @return
-   */
-  void navsat_callback(const sensor_msgs::NavSatFixConstPtr& navsat_msg) {
-    geographic_msgs::GeoPoint gps_msg;
-    gps_msg.latitude = navsat_msg->latitude;
-    gps_msg.longitude = navsat_msg->longitude;
-    gps_msg.altitude = navsat_msg->altitude;
-    
-    // convert (latitude, longitude, altitude) -> (easting, northing, altitude) in UTM coordinate
-    geodesy::UTMPoint utm;
-    geodesy::fromMsg(gps_msg, utm);
-    Eigen::Vector2d xy(utm.easting, utm.northing);
-
-    if(!zero_utm){
-      zero_utm = xy;
-      zero_utm_zone = utm.zone;
-      zero_utm_band = utm.band;
-
-      buildings_manager.reset(new BuildingTools("https://overpass-api.de", *zero_utm));
-      // fetch buildings as soon as possible
-      buildings_manager->getBuildings(navsat_msg->latitude, navsat_msg->longitude);
-    }
-
-    Eigen::Vector2d xy_enu(xy.x()-zero_utm->x(),xy.y()-zero_utm->y());
-    gps_points.push_back(xy_enu);
   }
 
     /**
@@ -421,11 +525,11 @@ private:
       read_until_pub.publish(read_until);
       read_until.frame_id = "/filtered_points";
       read_until_pub.publish(read_until);
-      return;
     }
 
-    // add building nodes
-    // update_building_nodes();
+    if(!keyframe_updated & !flush_gps_queue() & !update_building_nodes()) {
+      return;
+    }
 
     // loop detection
     std::vector<Loop::Ptr> loops = loop_detector->detect(keyframes, new_keyframes, *graph_slam);
@@ -457,6 +561,13 @@ private:
     trans_odom2map_mutex.lock();
     trans_odom2map = trans.matrix().cast<float>();
     trans_odom2map_mutex.unlock();
+
+    std::vector<KeyFrameSnapshot::Ptr> snapshot(keyframes.size());
+    std::transform(keyframes.begin(), keyframes.end(), snapshot.begin(), [=](const KeyFrame::Ptr& k) { return std::make_shared<KeyFrameSnapshot>(k); });
+
+    keyframes_snapshot_mutex.lock();
+    keyframes_snapshot.swap(snapshot);
+    keyframes_snapshot_mutex.unlock();
 
     if(odom2map_pub.getNumSubscribers()) {
       geometry_msgs::TransformStamped ts = matrix2transform(keyframe->stamp, trans.matrix().cast<float>(), map_frame_id, odom_frame_id);
@@ -540,7 +651,7 @@ private:
     edge_marker.type = visualization_msgs::Marker::LINE_LIST;
 
     edge_marker.pose.orientation.w = 1.0;
-    edge_marker.scale.x = 0.05;
+    edge_marker.scale.x = 0.04;
 
     edge_marker.points.resize(graph_slam->graph->edges().size() * 2);
     edge_marker.colors.resize(graph_slam->graph->edges().size() * 2);
@@ -571,69 +682,20 @@ private:
         edge_marker.colors[i * 2 + 1].g = p2;
         edge_marker.colors[i * 2 + 1].a = 1.0;
 
-        if(std::abs(v1->id() - v2->id()) > 2) {
-          edge_marker.points[i * 2].z += 0.5;
-          edge_marker.points[i * 2 + 1].z += 0.5;
-        }
-
         continue;
       }
 
-      g2o::EdgeSE3Plane* edge_plane = dynamic_cast<g2o::EdgeSE3Plane*>(edge);
-      if(edge_plane) {
-        g2o::VertexSE3* v1 = dynamic_cast<g2o::VertexSE3*>(edge_plane->vertices()[0]);
-        Eigen::Vector3d pt1 = v1->estimate().translation();
-        Eigen::Vector3d pt2(pt1.x(), pt1.y(), 0.0);
-
-        edge_marker.points[i * 2].x = pt1.x();
-        edge_marker.points[i * 2].y = pt1.y();
-        edge_marker.points[i * 2].z = pt1.z();
-        edge_marker.points[i * 2 + 1].x = pt2.x();
-        edge_marker.points[i * 2 + 1].y = pt2.y();
-        edge_marker.points[i * 2 + 1].z = pt2.z();
-
-        edge_marker.colors[i * 2].b = 1.0;
-        edge_marker.colors[i * 2].a = 1.0;
-        edge_marker.colors[i * 2 + 1].b = 1.0;
-        edge_marker.colors[i * 2 + 1].a = 1.0;
-
-        continue;
-      }
-
-      g2o::EdgeSE3PriorXY* edge_priori_xy = dynamic_cast<g2o::EdgeSE3PriorXY*>(edge);
+      g2o::EdgeSE2PriorXY* edge_priori_xy = dynamic_cast<g2o::EdgeSE2PriorXY*>(edge);
       if(edge_priori_xy) {
-        g2o::VertexSE3* v1 = dynamic_cast<g2o::VertexSE3*>(edge_priori_xy->vertices()[0]);
-        Eigen::Vector3d pt1 = v1->estimate().translation();
-        Eigen::Vector3d pt2 = Eigen::Vector3d::Zero();
+        g2o::VertexSE2* v1 = dynamic_cast<g2o::VertexSE2*>(edge_priori_xy->vertices()[0]);
+        Eigen::Vector2d pt1 = v1->estimate().translation();
+        Eigen::Vector2d pt2 = Eigen::Vector2d::Zero();
         pt2.head<2>() = edge_priori_xy->measurement();
 
         edge_marker.points[i * 2].x = pt1.x();
         edge_marker.points[i * 2].y = pt1.y();
-        edge_marker.points[i * 2].z = pt1.z() + 0.5;
         edge_marker.points[i * 2 + 1].x = pt2.x();
         edge_marker.points[i * 2 + 1].y = pt2.y();
-        edge_marker.points[i * 2 + 1].z = pt2.z() + 0.5;
-
-        edge_marker.colors[i * 2].r = 1.0;
-        edge_marker.colors[i * 2].a = 1.0;
-        edge_marker.colors[i * 2 + 1].r = 1.0;
-        edge_marker.colors[i * 2 + 1].a = 1.0;
-
-        continue;
-      }
-
-      g2o::EdgeSE3PriorXYZ* edge_priori_xyz = dynamic_cast<g2o::EdgeSE3PriorXYZ*>(edge);
-      if(edge_priori_xyz) {
-        g2o::VertexSE3* v1 = dynamic_cast<g2o::VertexSE3*>(edge_priori_xyz->vertices()[0]);
-        Eigen::Vector3d pt1 = v1->estimate().translation();
-        Eigen::Vector3d pt2 = edge_priori_xyz->measurement();
-
-        edge_marker.points[i * 2].x = pt1.x();
-        edge_marker.points[i * 2].y = pt1.y();
-        edge_marker.points[i * 2].z = pt1.z() + 0.5;
-        edge_marker.points[i * 2 + 1].x = pt2.x();
-        edge_marker.points[i * 2 + 1].y = pt2.y();
-        edge_marker.points[i * 2 + 1].z = pt2.z();
 
         edge_marker.colors[i * 2].r = 1.0;
         edge_marker.colors[i * 2].a = 1.0;
@@ -667,31 +729,88 @@ private:
     // gps markers
     visualization_msgs::Marker& gps_marker = markers.markers[4];
     gps_marker.header.frame_id = "map";
+    gps_marker.header.stamp = stamp;
     gps_marker.ns = "gps";
     gps_marker.id = 0;
-    gps_marker.type = visualization_msgs::Marker::SPHERE_LIST;
+    gps_marker.type = visualization_msgs::Marker::LINE_LIST;
 
     gps_marker.pose.orientation.w = 1.0;
-    gps_marker.scale.x = gps_marker.scale.y = gps_marker.scale.z = 0.5;
+    gps_marker.scale.x = gps_marker.scale.y = gps_marker.scale.z = 0.04;
 
-    int no_points = gps_points.size();
-    gps_marker.header.stamp = stamp;
-    for(int i = 0; i < no_points; i++){
-      Eigen::Vector2d xy = gps_points[i];
-      gps_marker.points.resize(no_points);
-      gps_marker.colors.resize(no_points);
+    gps_marker.points.resize(keyframes.size() * 2);
+    gps_marker.colors.resize(keyframes.size() * 2);
+    for(int i = 0; i < keyframes.size(); i++) {
 
-      gps_marker.points[i].x = xy.x();
-      gps_marker.points[i].y = xy.y();
-      gps_marker.points[i].z = 0;
+      auto keyframe = keyframes[i];
 
-      gps_marker.colors[i].r = 1.0;
-      gps_marker.colors[i].g = 1.0;
-      gps_marker.colors[i].b = 1.0;
-      gps_marker.colors[i].a = 0.2;
+      if(!keyframe->utm_coord)
+        continue;
+
+      Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
+      Eigen::Vector2d pt2 = *keyframe->utm_coord;
+
+      gps_marker.points[i * 2].x = pt1.x();
+      gps_marker.points[i * 2].y = pt1.y();
+      gps_marker.points[i * 2 + 1].x = pt2.x();
+      gps_marker.points[i * 2 + 1].y = pt2.y();
+
+      gps_marker.colors[i * 2].r = 1.0;
+      gps_marker.colors[i * 2].g = 1.0;
+      gps_marker.colors[i * 2].b = 1.0;
+      gps_marker.colors[i * 2].a = 1.0;
+      gps_marker.colors[i * 2 + 1].r = 1.0;
+      gps_marker.colors[i * 2 + 1].g = 1.0;
+      gps_marker.colors[i * 2 + 1].b = 1.0;
+      gps_marker.colors[i * 2 + 1].a = 1.0;
+      
     }
 
     return markers;
+  }
+
+    /**
+   * @brief save map data as pcd
+   * @param req
+   * @param res
+   * @return
+   */
+  bool save_map_service(delta_graph_slam::SaveMapRequest& req, delta_graph_slam::SaveMapResponse& res) {
+    std::vector<KeyFrameSnapshot::Ptr> snapshot;
+
+    keyframes_snapshot_mutex.lock();
+    snapshot = keyframes_snapshot;
+    keyframes_snapshot_mutex.unlock();
+
+    auto cloud = map_cloud_generator->generate(snapshot, req.resolution);
+    if(!cloud) {
+      res.success = false;
+      return true;
+    }
+
+    cloud->header.frame_id = map_frame_id;
+    cloud->header.stamp = snapshot.back()->cloud->header.stamp;
+
+    // if manager was initialized
+    if(buildings_manager){
+      // download all parsed buildings so far
+      std::vector<Building::Ptr> new_buildings = buildings_manager->getBuildings();
+
+      // create pointcloud of all buildings
+      pcl::PointCloud<PointT> buildings_cloud;
+      for(Building::Ptr building : new_buildings){
+        buildings_cloud += *(building->cloud);
+      }
+
+      buildings_cloud.header.frame_id = map_frame_id;
+      buildings_cloud.header.stamp = snapshot.back()->cloud->header.stamp;
+
+      pcl::io::savePCDFileBinary(req.destination+"/b_map.pcd", buildings_cloud);
+    }
+
+    int ret = pcl::io::savePCDFileBinary(req.destination+"/map.pcd", *cloud);
+    res.success = ret == 0;
+
+    return true;
   }
 
   ros::NodeHandle nh;
@@ -707,9 +826,12 @@ private:
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> flat_cloud_sub;
   std::unique_ptr<message_filters::Synchronizer<ApproxSyncPolicy>> sync;
 
+  ros::Subscriber gps_sub;
+  ros::Subscriber nmea_sub;
   ros::Subscriber navsat_sub;
+
   ros::Publisher buildings_pub;
-  ros::Publisher trans_buildings_pub;
+  ros::Publisher target_buildings_pub;
   ros::Publisher aligned_pub;
   ros::Publisher markers_pub;
 
@@ -723,13 +845,19 @@ private:
   std::string points_topic;
   ros::Publisher read_until_pub;
 
-  // gps points converted to ENU coordinates
-  std::vector<Eigen::Vector2d> gps_points;
+  ros::ServiceServer save_map_service_server;
 
   // keyframe queue
   std::string base_frame_id;
   std::mutex keyframe_queue_mutex;
   std::deque<KeyFrame::Ptr> keyframe_queue;
+
+  // gps queue
+  double gps_time_offset;
+  double gps_edge_stddev_xy;
+  double gps_edge_stddev_z;
+  std::mutex gps_queue_mutex;
+  std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
 
   boost::optional<Eigen::Vector2d> zero_utm;
   int zero_utm_zone;
@@ -737,8 +865,15 @@ private:
 
   BuildingTools::Ptr buildings_manager;
   fast_gicp::FastGICP<PointT, PointT>::Ptr registration;
-  bool first_guess = true;
-  Eigen::Matrix4f prev_guess;
+  double initial_orientation = 0.f;
+  double weight_estimates = 0;
+
+  // for map cloud generation
+  std::atomic_bool graph_updated;
+  double map_cloud_resolution;
+  std::mutex keyframes_snapshot_mutex;
+  std::vector<KeyFrameSnapshot::Ptr> keyframes_snapshot;
+  std::unique_ptr<MapCloudGenerator> map_cloud_generator;
 
   // graph slam
   // all the below members must be accessed after locking main_thread_mutex
@@ -755,6 +890,7 @@ private:
   std::unique_ptr<GraphSLAM> graph_slam;
   std::unique_ptr<LoopDetector> loop_detector;
   std::unique_ptr<KeyframeUpdater> keyframe_updater;
+  std::unique_ptr<NmeaSentenceParser> nmea_parser;
 
   std::unique_ptr<InformationMatrixCalculator> inf_calclator;
 };

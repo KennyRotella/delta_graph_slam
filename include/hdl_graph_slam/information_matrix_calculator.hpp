@@ -32,12 +32,19 @@ public:
   }
 
   static double calc_fitness_score(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose, double max_range = std::numeric_limits<double>::max());
+  static double calc_fitness_score_buildings(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose, double max_range = std::numeric_limits<double>::max());
 
   Eigen::MatrixXd calc_information_matrix(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose) const;
+  Eigen::MatrixXd calc_information_matrix_buildings(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose) const;
 
 private:
   double weight(double a, double max_x, double min_y, double max_y, double x) const {
     double y = (1.0 - std::exp(-a * x)) / (1.0 - std::exp(-a * max_x));
+    return min_y + (max_y - min_y) * y;
+  }
+
+  double b_weight(double a, double avg_x, double min_y, double max_y, double x) const {
+    double y = std::exp(a * (x - avg_x)) / (std::exp(a * (x - avg_x)) + 1.0);
     return min_y + (max_y - min_y) * y;
   }
 
@@ -52,6 +59,15 @@ private:
   double min_stddev_q;
   double max_stddev_q;
   double fitness_score_thresh;
+
+  double b_var_gain_a;
+  double b_min_stddev_x;
+  double b_max_stddev_x;
+  double b_min_stddev_q;
+  double b_max_stddev_q;
+  double b_avg_fitness_score;
+
+  double b_importance_ratio;
 };
 
 }  // namespace hdl_graph_slam
