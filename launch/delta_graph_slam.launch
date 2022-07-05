@@ -4,10 +4,8 @@
 
   <!-- arguments -->
   <arg name="nodelet_manager" default="velodyne_nodelet_manager" />
-  <arg name="enable_floor_detection" default="false" />
-  <arg name="enable_gps" default="false" />
-  <arg name="enable_imu_acc" default="false" />
-  <arg name="enable_imu_ori" default="false" />
+  <arg name="enable_gps" default="true" />
+  <arg name="enable_gps_priors" default="false" />
 
   <arg name="points_topic" default="/kitti/velo/pointcloud" />
   <arg name="gps_topic" default="/kitti/oxts/gps/fix" />
@@ -17,9 +15,10 @@
   <!-- optional arguments -->
   <arg name="enable_robot_odometry_init_guess" default="false" />
   <arg name="robot_odom_frame_id" default="robot_odom" />
+  <arg name="lidar_height" default="1.73" />
 
   <!-- transformation between lidar and base_link -->
-  <node pkg="tf" type="static_transform_publisher" name="base2lidar_publisher" args="0 0 1.73 0 0 0 base_link velo_link 100" />
+  <node pkg="tf" type="static_transform_publisher" name="base2lidar_publisher" args="0 0 $(arg lidar_height) 0 0 0 base_link velo_link 100" />
 
   <!-- in case you use velodyne_driver, comment out the following line -->
   <node pkg="nodelet" type="nodelet" name="$(arg nodelet_manager)" args="manager" output="screen"/>
@@ -42,7 +41,7 @@
     <param name="statistical_stddev" value="1.2" />
     <param name="radius_radius" value="0.5" />
     <param name="radius_min_neighbors" value="2" />
-    <param name="lidar_height" value="1.73" />
+    <param name="lidar_height" value="$(arg lidar_height)" />
   </node>
 
   <!-- scan_matching_odometry_nodelet -->
@@ -107,10 +106,13 @@
     <param name="reg_correspondence_randomness" value="20"/>
     <param name="reg_resolution" value="1.0" />
     <param name="reg_nn_search_method" value="DIRECT7" />
+    <!-- edge params -->
+    <!-- GPS -->
+    <param name="gps_edge_robust_kernel" value="NONE" />
+    <param name="gps_edge_robust_kernel_size" value="1.0" />
+    <param name="gps_edge_stddev_xy" value="1500" />
     <!-- scan matching -->
     <!-- robust kernels: NONE, Cauchy, DCS, Fair, GemanMcClure, Huber, PseudoHuber, Saturated, Tukey, Welsch -->
-    <param name="odometry_edge_robust_kernel" value="NONE" />
-    <param name="odometry_edge_robust_kernel_size" value="1.0" />
     <param name="odometry_edge_robust_kernel" value="NONE" />
     <param name="odometry_edge_robust_kernel_size" value="1.0" />
     <param name="loop_closure_edge_robust_kernel" value="Huber" />
@@ -126,13 +128,25 @@
     <!-- update params -->
     <param name="graph_update_interval" value="3.0" />
     <!-- delta params -->
-    <param name="delta_init_angle" value="35.0" />
+    <param name="delta_init_angle" value="-31" />
     <param name="delta_init_x" value="0" />
     <param name="delta_init_y" value="0" />
+
     <param name="delta_num_threads" value="0" />
     <param name="delta_maximum_iterations" value="64" />
-    <param name="delta_max_correspondece_distance" value="3.0" />
+    <param name="delta_max_correspondence_distance" value="2" />
+    <param name="delta_transformation_epsilon" value="0.001" />
     <param name="delta_debug_print" value="false" />
+
+    <param name="delta_var_gain_a" value="10" />
+    <param name="delta_min_stddev_x" value="0.1" />
+    <param name="delta_max_stddev_x" value="5.0" />
+    <param name="delta_min_stddev_q" value="0.05" />
+    <param name="delta_max_stddev_q" value="0.2" />
+    <param name="delta_avg_fitness_score" value="2.0" />
+
+    <param name="delta_importance_ratio" value="1.0" />
+    <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
   </node>
   
   <node pkg="delta_graph_slam" type="map2odom_publisher.py" name="map2odom_publisher" />

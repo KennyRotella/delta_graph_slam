@@ -102,18 +102,10 @@ target_link_libraries(prefiltering_nodelet
   ${PCL_LIBRARIES}
 )
 
-
-add_library(floor_detection_nodelet apps/floor_detection_nodelet.cpp)
-target_link_libraries(floor_detection_nodelet
-  ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
-)
-add_dependencies(floor_detection_nodelet ${PROJECT_NAME}_gencpp)
-
-
 add_library(scan_matching_odometry_nodelet
   apps/scan_matching_odometry_nodelet.cpp
   src/hdl_graph_slam/registrations.cpp
+  src/hdl_graph_slam/ros_utils.cpp
 )
 target_link_libraries(scan_matching_odometry_nodelet
   ${catkin_LIBRARIES}
@@ -126,11 +118,13 @@ add_library(delta_graph_slam_nodelet
   apps/delta_graph_slam_nodelet.cpp
   src/hdl_graph_slam/graph_slam.cpp
   src/hdl_graph_slam/keyframe.cpp
+  src/hdl_graph_slam/map_cloud_generator.cpp
   src/hdl_graph_slam/registrations.cpp
   src/hdl_graph_slam/information_matrix_calculator.cpp
   src/g2o/robust_kernel_io.cpp
   src/hdl_graph_slam/building.cpp
   src/hdl_graph_slam/building_tools.cpp 
+  src/hdl_graph_slam/ros_utils.cpp
 )
 target_link_libraries(delta_graph_slam_nodelet
   ${catkin_LIBRARIES}
@@ -163,7 +157,6 @@ install(FILES nodelet_plugins.xml
 
 install(TARGETS
   prefiltering_nodelet
-  floor_detection_nodelet
   scan_matching_odometry_nodelet
   delta_graph_slam_nodelet
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
