@@ -7,6 +7,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/thread/thread.hpp>
 #include <hdl_graph_slam/building.hpp>
+#include <hdl_graph_slam/ros_utils.hpp>
 #include <pcl/common/distances.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -76,7 +77,6 @@ private:
 	std::vector<Building::Ptr> parseBuildings(double lat, double lon);
 	pcl::PointCloud<PointT>::Ptr buildPointCloud(std::vector<std::string> nd_refs);
 	Node getNode(std::string nd_ref);
-	pcl::PointCloud<PointT>::Ptr interpolate(PointT a, PointT b);
 	PointT toEnu(Eigen::Vector3d lla);
 	bool isBuildingInRadius(pt::ptree::value_type &tree_node, double lat, double lon);
 	Eigen::Isometry2d getBuildingPose(std::vector<std::string> nd_refs);

@@ -10,8 +10,11 @@
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <tf/transform_listener.h>
+#include <pcl_conversions/pcl_conversions.h>
 
 namespace hdl_graph_slam {
+
+using PointT = pcl::PointXYZ;
 
 /**
  * @brief convert Eigen::Matrix to geometry_msgs::TransformStamped
@@ -43,6 +46,8 @@ Eigen::Vector3f normalize_euler_angs(Eigen::Vector3f euler_angs);
 Eigen::Matrix4f transform2Dto3D(Eigen::Matrix3f trans2D);
 
 Eigen::Matrix3f transform3Dto2D(Eigen::Matrix4f trans3D);
+
+pcl::PointCloud<PointT>::Ptr interpolate(PointT a, PointT b);
 
 }  // namespace hdl_graph_slam
 
