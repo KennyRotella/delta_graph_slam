@@ -2,7 +2,12 @@
 
 namespace hdl_graph_slam {
 
-pcl::PointIndices::Ptr extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
+Eigen::Matrix4f LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget) {
+  //TODO: To Be Developed
+  return Eigen::Matrix4f(1.0,1.0,1.0,1.0) 
+}
+
+pcl::PointIndices::Ptr LineBasedScanmatcher::extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
 
   pcl::PointCloud<PointT>::Ptr cloud_plane(new pcl::PointCloud<PointT>);
   for (int i=0; i<inliers->indices.size(); i++){
@@ -16,9 +21,9 @@ pcl::PointIndices::Ptr extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::P
 
   std::vector<pcl::PointIndices> clusters;
   pcl::EuclideanClusterExtraction<PointT> ec;
-  ec.setClusterTolerance (1); // 100cm
-  ec.setMinClusterSize (30);
-  ec.setMaxClusterSize (25000);
+  ec.setClusterTolerance (cluster_tolerance); // 100cm
+  ec.setMinClusterSize (min_cluster_size);
+  ec.setMaxClusterSize (max_cluster_size);
   ec.setSearchMethod (tree);
   ec.setInputCloud (cloud_plane);
   ec.extract (clusters);
@@ -37,7 +42,7 @@ pcl::PointIndices::Ptr extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::P
   return inliers;
 }
 
-pcl::PointCloud<PointT>::ConstPtr line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud) {
+std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud) {
 
   pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
   *filtered = *cloud;
@@ -49,12 +54,14 @@ pcl::PointCloud<PointT>::ConstPtr line_extraction(const pcl::PointCloud<PointT>:
   pcl::ExtractIndices<PointT> extract;
   seg.setOptimizeCoefficients (true);
   seg.setModelType (pcl::SACMODEL_LINE);
-  seg.setMethodType (pcl::SAC_RANSAC);
-  seg.setDistanceThreshold(0.250f);
+  seg.setMethodType (sac_method_type);
+  seg.setDistanceThreshold(sac_distance_threshold);
 
   // Create pointcloud to publish inliers
   pcl::PointCloud<PointT>::Ptr cloud_pub(new pcl::PointCloud<PointT>), cloud_line(new pcl::PointCloud<PointT>);
   int original_size(filtered->height*filtered->width);
+  std::vector<LineFeature> lines;
+
   while (filtered->height*filtered->width > original_size*0.05){
 
     // Fit a line
@@ -142,11 +149,22 @@ pcl::PointCloud<PointT>::ConstPtr line_extraction(const pcl::PointCloud<PointT>:
 
     if(mean_error < 150 && (vt_A-vt_B).norm() > 2.5){
       *cloud_line += *interpolate(pt_A,pt_B);
+      lines.push_back({
+        vt_a,       // PointA
+        vt_b,       // PointB
+        mean_error, // mean_error
+        sigma,      // std_sigma
+        max_error,  // max_error
+        min_error   // min_error
+      })
     }
+
+
   }
 
-  cloud_line->header = cloud->header;
-  return cloud_line;
+  return lines;
+  // cloud_line->header = cloud->header;
+  // return cloud_line;
 }
 
 }  // namespace hdl_graph_slam
