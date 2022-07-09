@@ -171,26 +171,6 @@ BuildingTools::Node BuildingTools::getNode(std::string nd_ref) {
 	return Node();
 }
 
-pcl::PointCloud<PointT>::Ptr BuildingTools::interpolate(PointT a, PointT b) {
-	// linear interpolation: return a line of points between a and b (1 every 2cm)
-	const float sample_step = 0.02;
-	pcl::PointCloud<PointT>::Ptr building_pointcloud(new pcl::PointCloud<PointT>);
-	Eigen::Vector3f AtoB = b.getVector3fMap()-a.getVector3fMap();
-	Eigen::Vector3f AtoBnormalized = AtoB.normalized();
-	float AtoBnorm = AtoB.norm();
-
-	for(float i=0; i<=AtoBnorm; i=i+sample_step) {
-		PointT pointXYZ;
-
-		pointXYZ.x = a.x + i*AtoBnormalized.x();
-		pointXYZ.y = a.y + i*AtoBnormalized.y();
-		pointXYZ.z = 0;
-
-		building_pointcloud->push_back(pointXYZ);
-	}
-	return building_pointcloud;
-}
-
 // toEnu converts to enu coordinates from lla
 PointT BuildingTools::toEnu(Eigen::Vector3d lla) {
 	geographic_msgs::GeoPoint gps_msg;

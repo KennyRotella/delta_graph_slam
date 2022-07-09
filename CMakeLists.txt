@@ -96,7 +96,9 @@ include_directories(
 )
 
 # nodelets
-add_library(prefiltering_nodelet apps/prefiltering_nodelet.cpp)
+add_library(prefiltering_nodelet
+  apps/prefiltering_nodelet.cpp
+)
 target_link_libraries(prefiltering_nodelet
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
@@ -125,6 +127,7 @@ add_library(delta_graph_slam_nodelet
   src/hdl_graph_slam/building.cpp
   src/hdl_graph_slam/building_tools.cpp 
   src/hdl_graph_slam/ros_utils.cpp
+  src/hdl_graph_slam/line_based_scanmatcher.cpp
 )
 target_link_libraries(delta_graph_slam_nodelet
   ${catkin_LIBRARIES}
