@@ -23,8 +23,8 @@ namespace hdl_graph_slam {
  * @brief LineFeature extracted feature from pointclouds
  */
 struct LineFeature {
-  Eigen::Vector2f PointA;
-  Eigen::Vector2f PointB;
+  Eigen::Vector3f PointA;
+  Eigen::Vector3f PointB;
 
   // RANSAC line fitting statistics
   double mean_error;
@@ -33,21 +33,36 @@ struct LineFeature {
   double min_error;
 
   float lenght(){ return (PointA-PointB).norm(); }
-  Eigen::Vector2f middlePoint(){ return PointA + (PointB-PointA)/2.f; }
+  Eigen::Vector3f middlePoint(){ return PointA + (PointB-PointA)/2.f; }
 };
 
 class LineBasedScanmatcher {
-  // ec.setClusterTolerance (1); // 100cm
-  // ec.setMinClusterSize (30);
-  // ec.setMaxClusterSize (25000);
-  // seg.setMethodType (pcl::SAC_RANSAC);
-  // seg.setDistanceThreshold(0.250f);
+
   // mean_error < 150 && (vt_A-vt_B).norm() > 2.5
 
   public:
+  // Base constructor using default values
+  LineBasedScanmatcher():
+    min_cluster_size(30),
+    max_cluster_size(25000),
+    cluster_tolerance(pcl::SAC_RANSAC),
+    sac_distance_threshold(0.250f) {}
+  // Setter to customize algorithm parameter values
+  void setMinClusterSize (pcl::uindex_t min_cluster_size) {this.min_cluster_size = min_cluster_size};
+  void setMaxClusterSize (pcl::uindex_t max_cluster_size) {this.max_cluster_size = max_cluster_size};
+  void setClusterTolerance (double cluster_tolerance) {this.cluster_tolerance = cluster_tolerance};
+  void setSACMethodType (int sac_method_type) {this.sac_method_type = sac_method_type};
+  void setSACDistanceThreshold (double sac_distance_threshold) {this.sac_distance_threshold = sac_distance_threshold};
+  
   Eigen::Matrix4f align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget);
 
   private:
+  pcl::uindex_t min_cluster_size;
+  pcl::uindex_t max_cluster_size;
+  double cluster_tolerance;
+  int sac_method_type; // SAC_SEGMENTATION_METHOD
+  double sac_distance_threshold; // SAC_SEGMENTATION_DISTANCE_THRESHOLD
+  
   pcl::PointIndices::Ptr extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
 };
