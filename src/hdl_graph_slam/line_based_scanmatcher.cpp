@@ -4,7 +4,7 @@ namespace hdl_graph_slam {
 
 Eigen::Matrix4f LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget) {
   //TODO: To Be Developed
-  return Eigen::Matrix4f(1.0,1.0,1.0,1.0) 
+  return Eigen::Matrix4f::Identity();
 }
 
 pcl::PointIndices::Ptr LineBasedScanmatcher::extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
@@ -21,7 +21,7 @@ pcl::PointIndices::Ptr LineBasedScanmatcher::extractCluster(pcl::PointCloud<Poin
 
   std::vector<pcl::PointIndices> clusters;
   pcl::EuclideanClusterExtraction<PointT> ec;
-  ec.setClusterTolerance (cluster_tolerance); // 100cm
+  ec.setClusterTolerance (cluster_tolerance);
   ec.setMinClusterSize (min_cluster_size);
   ec.setMaxClusterSize (max_cluster_size);
   ec.setSearchMethod (tree);
@@ -39,6 +39,7 @@ pcl::PointIndices::Ptr LineBasedScanmatcher::extractCluster(pcl::PointCloud<Poin
   } else {
     inliers->indices.clear();
   }
+
   return inliers;
 }
 
@@ -49,29 +50,28 @@ std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointC
 
   // Get segmentation ready
   pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
-  pcl::PointIndices::Ptr inliers(new pcl::PointIndices), line_inliers(new pcl::PointIndices);
-  pcl::SACSegmentation<PointT> seg;
+  pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
   pcl::ExtractIndices<PointT> extract;
-  seg.setOptimizeCoefficients (true);
-  seg.setModelType (pcl::SACMODEL_LINE);
-  seg.setMethodType (sac_method_type);
+  pcl::SACSegmentation<PointT> seg;
+  seg.setOptimizeCoefficients(true);
+  seg.setModelType(pcl::SACMODEL_LINE);
+  seg.setMethodType(sac_method_type);
   seg.setDistanceThreshold(sac_distance_threshold);
 
-  // Create pointcloud to publish inliers
-  pcl::PointCloud<PointT>::Ptr cloud_pub(new pcl::PointCloud<PointT>), cloud_line(new pcl::PointCloud<PointT>);
-  int original_size(filtered->height*filtered->width);
   std::vector<LineFeature> lines;
 
-  while (filtered->height*filtered->width > original_size*0.05){
+  while(true){
 
     // Fit a line
     seg.setInputCloud(filtered);
-    seg.segment(*line_inliers, *coefficients);
+    seg.segment(*inliers, *coefficients);
 
     Eigen::Vector3f vt_line(coefficients->values[0], coefficients->values[1], 0.f);
     Eigen::Vector3f vt_direction(coefficients->values[3], coefficients->values[4], 0.f);
+    // All projections will not be scaled
+    vt_direction.normalize();
 
-    inliers = extractCluster(filtered, line_inliers);
+    inliers = extractCluster(filtered, inliers);
 
     // Check result
     if (!inliers || inliers->indices.size() == 0)
@@ -89,7 +89,7 @@ std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointC
 
       // Compute distance
       Eigen::Vector3f vt = pt.getVector3fMap();
-      Eigen::Vector3f vt_projected = vt_line + vt_direction.normalized()*((vt - vt_line).dot(vt_direction.normalized()));
+      Eigen::Vector3f vt_projected = vt_line + vt_direction*((vt - vt_line).dot(vt_direction));
       double d = (vt-vt_projected).norm()*1000; // mm
       err.push_back(d);
 
@@ -99,13 +99,16 @@ std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointC
       if (d<min_error) min_error = d;
 
     }
-    mean_error/=inliers->indices.size();
+    mean_error /= inliers->indices.size();
 
     // Compute Standard deviation
     double sigma(0);
-    PointT pt_A, pt_B;
-    pt_A = filtered->points[inliers->indices[0]];
-    pt_B = filtered->points[inliers->indices[0]];
+
+    // Initialize line segment end points
+    Eigen::Vector3f vt_A, vt_B;
+    vt_A = filtered->points[inliers->indices[0]].getVector3fMap();
+    vt_A = vt_line + vt_direction*((vt_A - vt_line).dot(vt_direction));
+    vt_B = vt_A;
 
     for (int i=0;i<inliers->indices.size();i++){
 
@@ -113,31 +116,20 @@ std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointC
 
       // Get Point
       PointT pt = filtered->points[inliers->indices[i]];
-      cloud_pub->points.push_back(pt);
-
       Eigen::Vector3f vt = pt.getVector3fMap();
-      Eigen::Vector3f vt_A = pt_A.getVector3fMap();
-      Eigen::Vector3f vt_B = pt_B.getVector3fMap();
+
+      // Projection of the point on the line
+      vt = vt_line + vt_direction*((vt - vt_line).dot(vt_direction));
       if((vt - vt_line).dot(vt_direction) < (vt_A - vt_line).dot(vt_direction)){
-        pt_A = pt;
+        vt_A = vt;
       }
 
       if((vt - vt_line).dot(vt_direction) > (vt_B - vt_line).dot(vt_direction)){
-        pt_B = pt;
+        vt_B = vt;
       }
 
     }
     sigma = sqrt(sigma/inliers->indices.size());
-
-    Eigen::Vector3f vt_A = pt_A.getVector3fMap();
-    Eigen::Vector3f vt_B = pt_B.getVector3fMap();
-    vt_A = vt_line + vt_direction.normalized()*((vt_A - vt_line).dot(vt_direction.normalized()));
-    vt_B = vt_line + vt_direction.normalized()*((vt_B - vt_line).dot(vt_direction.normalized()));
-
-    pt_A.x = vt_A.x();
-    pt_A.y = vt_A.y();
-    pt_B.x = vt_B.x();
-    pt_B.y = vt_B.y();
 
     // Extract inliers
     extract.setInputCloud(filtered);
@@ -147,24 +139,20 @@ std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointC
     extract.filter(cloudF);
     filtered->swap(cloudF);
 
-    if(mean_error < 150 && (vt_A-vt_B).norm() > 2.5){
-      *cloud_line += *interpolate(pt_A,pt_B);
+    if(mean_error < merror_threshold && (vt_A-vt_B).norm() > line_lenght_threshold){
       lines.push_back({
-        vt_a,       // PointA
-        vt_b,       // PointB
+        vt_A,       // PointA
+        vt_B,       // PointB
         mean_error, // mean_error
         sigma,      // std_sigma
         max_error,  // max_error
         min_error   // min_error
-      })
+      });
     }
-
 
   }
 
   return lines;
-  // cloud_line->header = cloud->header;
-  // return cloud_line;
 }
 
 }  // namespace hdl_graph_slam

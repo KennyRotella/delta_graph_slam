@@ -35,6 +35,7 @@
 #include <hdl_graph_slam/building_tools.hpp>
 #include <hdl_graph_slam/map_cloud_generator.hpp>
 #include <hdl_graph_slam/nmea_sentence_parser.hpp>
+#include <hdl_graph_slam/line_based_scanmatcher.hpp>
 #include <fast_gicp/gicp/fast_gicp.hpp>
 
 #include <g2o/types/slam2d/edge_se2.h>
@@ -69,6 +70,7 @@ public:
     map_cloud_generator.reset(new MapCloudGenerator());
     inf_calclator.reset(new InformationMatrixCalculator(private_nh));
     nmea_parser.reset(new NmeaSentenceParser());
+    line_based_scanmatcher.reset(new LineBasedScanmatcher());
 
     gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
     gps_edge_stddev_xy = private_nh.param<double>("gps_edge_stddev_xy", 10000.0);
@@ -215,12 +217,19 @@ private:
       Eigen::Matrix4f alignTrans_flatCloud_to_buildCloud3D = registration->getFinalTransformation();
       alignTrans_flatCloud_to_buildCloud = transform3Dto2D(alignTrans_flatCloud_to_buildCloud3D).cast<double>();
 
-      aligned->header = flat_cloud->header;
-      aligned_pub.publish(*aligned);
+      // TEST LINES
+      pcl::PointCloud<PointT>::Ptr cloud_lines(new pcl::PointCloud<PointT>());
+      cloud_lines->header = flat_cloud->header;
+      std::vector<LineFeature> lines = line_based_scanmatcher->line_extraction(aligned);
+      for(LineFeature line : lines){
+        *cloud_lines += *interpolate(line.PointA, line.PointB);
+      }
 
-      // double weight = inf_calclator->calc_fitness_score_buildings(flat_cloud, trans_buildings_cloud, Eigen::Isometry3d(alignTrans_flatCloud_to_buildCloud3D.cast<double>()).inverse());
-      // std::cout << "FITNESS: " << registration->getFitnessScore() << std::endl;
-      // std::cout << "SCORE: " << weight << std::endl;
+      aligned_pub.publish(cloud_lines);
+
+      // aligned->header = flat_cloud->header;
+      // aligned_pub.publish(*aligned);
+
     }
 
     double accum_d = keyframe_updater->get_accum_distance();
@@ -890,9 +899,10 @@ private:
   std::unique_ptr<GraphSLAM> graph_slam;
   std::unique_ptr<LoopDetector> loop_detector;
   std::unique_ptr<KeyframeUpdater> keyframe_updater;
-  std::unique_ptr<NmeaSentenceParser> nmea_parser;
-
   std::unique_ptr<InformationMatrixCalculator> inf_calclator;
+  std::unique_ptr<NmeaSentenceParser> nmea_parser;
+  std::unique_ptr<LineBasedScanmatcher> line_based_scanmatcher;
+
 };
 
 } // namespace hdl_graph_slam
