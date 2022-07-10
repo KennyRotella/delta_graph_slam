@@ -38,30 +38,34 @@ struct LineFeature {
 
 class LineBasedScanmatcher {
 
-  // mean_error < 150 && (vt_A-vt_B).norm() > 2.5
-
   public:
   // Base constructor using default values
   LineBasedScanmatcher():
     min_cluster_size(30),
     max_cluster_size(25000),
-    cluster_tolerance(pcl::SAC_RANSAC),
-    sac_distance_threshold(0.250f) {}
+    cluster_tolerance(1.5),
+    sac_method_type(pcl::SAC_RANSAC),
+    sac_distance_threshold(0.250f),
+    merror_threshold(150.0),
+    line_lenght_threshold(2.5) {}
+
   // Setter to customize algorithm parameter values
-  void setMinClusterSize (pcl::uindex_t min_cluster_size) {this.min_cluster_size = min_cluster_size};
-  void setMaxClusterSize (pcl::uindex_t max_cluster_size) {this.max_cluster_size = max_cluster_size};
-  void setClusterTolerance (double cluster_tolerance) {this.cluster_tolerance = cluster_tolerance};
-  void setSACMethodType (int sac_method_type) {this.sac_method_type = sac_method_type};
-  void setSACDistanceThreshold (double sac_distance_threshold) {this.sac_distance_threshold = sac_distance_threshold};
+  void setMinClusterSize (double min_cluster_size) {this->min_cluster_size = min_cluster_size;};
+  void setMaxClusterSize (double max_cluster_size) {this->max_cluster_size = max_cluster_size;};
+  void setClusterTolerance (double cluster_tolerance) {this->cluster_tolerance = cluster_tolerance;};
+  void setSACMethodType (int sac_method_type) {this->sac_method_type = sac_method_type;};
+  void setSACDistanceThreshold (double sac_distance_threshold) {this->sac_distance_threshold = sac_distance_threshold;};
   
   Eigen::Matrix4f align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget);
 
-  private:
-  pcl::uindex_t min_cluster_size;
-  pcl::uindex_t max_cluster_size;
+  public:
+  double min_cluster_size;
+  double max_cluster_size;
   double cluster_tolerance;
-  int sac_method_type; // SAC_SEGMENTATION_METHOD
-  double sac_distance_threshold; // SAC_SEGMENTATION_DISTANCE_THRESHOLD
+  int sac_method_type;            // SAC_SEGMENTATION_METHOD
+  double sac_distance_threshold;  // SAC_SEGMENTATION_DISTANCE_THRESHOLD
+  double merror_threshold;        // max mean error acceptance threshold
+  double line_lenght_threshold;   // min line lenght acceptance threshold
   
   pcl::PointIndices::Ptr extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
