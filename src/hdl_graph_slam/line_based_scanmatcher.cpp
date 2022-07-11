@@ -43,7 +43,7 @@ pcl::PointIndices::Ptr LineBasedScanmatcher::extractCluster(pcl::PointCloud<Poin
   return inliers;
 }
 
-std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud) {
+std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud) {
 
   pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>());
   *filtered = *cloud;
@@ -58,7 +58,7 @@ std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointC
   seg.setMethodType(sac_method_type);
   seg.setDistanceThreshold(sac_distance_threshold);
 
-  std::vector<LineFeature> lines;
+  std::vector<LineFeature::Ptr> lines;
 
   while(true){
 
@@ -140,19 +140,90 @@ std::vector<LineFeature> LineBasedScanmatcher::line_extraction(const pcl::PointC
     filtered->swap(cloudF);
 
     if(mean_error < merror_threshold && (vt_A-vt_B).norm() > line_lenght_threshold){
-      lines.push_back({
+      LineFeature::Ptr line(new LineFeature());
+      *line = {
         vt_A,       // PointA
         vt_B,       // PointB
         mean_error, // mean_error
         sigma,      // std_sigma
         max_error,  // max_error
         min_error   // min_error
-      });
+      };
+      lines.push_back(line);
     }
 
   }
 
   return lines;
+}
+
+std::vector<EdgeFeature::Ptr> LineBasedScanmatcher::edge_extraction(std::vector<LineFeature::Ptr> lines){
+
+  std::vector<EdgeFeature::Ptr> edges;
+
+  for(int i=0; i<lines.size()-1; i++){
+    for(int j=i+1; j<lines.size(); j++){
+      EdgeFeature::Ptr edge = check_edge(lines[i], lines[j]);
+      if(edge != nullptr){
+        edges.push_back(edge);
+      }
+    }
+  }
+
+  return edges;
+}
+
+EdgeFeature::Ptr LineBasedScanmatcher::check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2){
+
+  // lines should be perpendicular
+  double cosine = (line1->PointA - line1->PointB).normalized().dot(
+                (line2->PointA - line2->PointB).normalized());
+  if(std::abs(cosine) > 0.5){
+    return nullptr;
+  }
+
+  EdgeFeature::Ptr edge(new EdgeFeature());
+  edge = nullptr;
+
+  if((line1->PointA - line2->PointA).norm() < 1.0){
+
+    edge.reset(new EdgeFeature());
+    *edge = {
+      line1->PointA,
+      line1,
+      line2
+    };
+
+  } else if((line1->PointA - line2->PointB).norm() < 1.0){
+
+    edge.reset(new EdgeFeature());
+    *edge = {
+      line1->PointA,
+      line1,
+      line2
+    };
+
+  } else if((line1->PointB - line2->PointA).norm() < 1.0){
+
+    edge.reset(new EdgeFeature());
+    *edge = {
+      line1->PointB,
+      line1,
+      line2
+    };
+
+  } else if((line1->PointB - line2->PointB).norm() < 1.0){
+
+    edge.reset(new EdgeFeature());
+    *edge = {
+      line1->PointB,
+      line1,
+      line2
+    };
+
+  }
+
+  return edge;
 }
 
 }  // namespace hdl_graph_slam
