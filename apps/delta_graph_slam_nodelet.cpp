@@ -220,9 +220,12 @@ private:
       // TEST LINES
       pcl::PointCloud<PointT>::Ptr cloud_lines(new pcl::PointCloud<PointT>());
       cloud_lines->header = flat_cloud->header;
-      std::vector<LineFeature> lines = line_based_scanmatcher->line_extraction(aligned);
-      for(LineFeature line : lines){
-        *cloud_lines += *interpolate(line.PointA, line.PointB);
+      std::vector<LineFeature::Ptr> lines = line_based_scanmatcher->line_extraction(aligned);
+      std::vector<EdgeFeature::Ptr> edges = line_based_scanmatcher->edge_extraction(lines);
+      std::cout << "ASDASD" << edges.size() << std::endl;
+      for(EdgeFeature::Ptr edge : edges){
+        *cloud_lines += *interpolate(edge->lineA->PointA, edge->lineA->PointB);
+        *cloud_lines += *interpolate(edge->lineB->PointA, edge->lineB->PointB);
       }
 
       aligned_pub.publish(cloud_lines);

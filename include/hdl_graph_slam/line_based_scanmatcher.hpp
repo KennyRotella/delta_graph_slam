@@ -23,6 +23,8 @@ namespace hdl_graph_slam {
  * @brief LineFeature extracted feature from pointclouds
  */
 struct LineFeature {
+  using Ptr = std::shared_ptr<LineFeature>;
+
   Eigen::Vector3f PointA;
   Eigen::Vector3f PointB;
 
@@ -34,6 +36,14 @@ struct LineFeature {
 
   float lenght(){ return (PointA-PointB).norm(); }
   Eigen::Vector3f middlePoint(){ return PointA + (PointB-PointA)/2.f; }
+};
+
+struct EdgeFeature {
+  using Ptr = std::shared_ptr<EdgeFeature>;
+
+  Eigen::Vector3f edgePoint;
+  LineFeature::Ptr lineA;
+  LineFeature::Ptr lineB;
 };
 
 class LineBasedScanmatcher {
@@ -68,7 +78,9 @@ class LineBasedScanmatcher {
   double line_lenght_threshold;   // min line lenght acceptance threshold
   
   pcl::PointIndices::Ptr extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
-  std::vector<LineFeature> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
+  std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
+  std::vector<EdgeFeature::Ptr> edge_extraction(std::vector<LineFeature::Ptr> lines);
+  EdgeFeature::Ptr check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2);
 };
 
 }  // namespace hdl_graph_slam
