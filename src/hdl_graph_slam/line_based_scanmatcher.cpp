@@ -7,7 +7,7 @@ Eigen::Matrix4f LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr inputSo
   return Eigen::Matrix4f::Identity();
 }
 
-pcl::PointIndices::Ptr LineBasedScanmatcher::extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
+pcl::PointIndices::Ptr LineBasedScanmatcher::extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
 
   pcl::PointCloud<PointT>::Ptr cloud_plane(new pcl::PointCloud<PointT>);
   for (int i=0; i<inliers->indices.size(); i++){
@@ -57,10 +57,11 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::P
   seg.setModelType(pcl::SACMODEL_LINE);
   seg.setMethodType(sac_method_type);
   seg.setDistanceThreshold(sac_distance_threshold);
+  seg.setMaxIterations(max_iterations);
 
   std::vector<LineFeature::Ptr> lines;
 
-  while(true){
+  while(filtered->points.size() > 0){
 
     // Fit a line
     seg.setInputCloud(filtered);
@@ -68,10 +69,11 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::P
 
     Eigen::Vector3f vt_line(coefficients->values[0], coefficients->values[1], 0.f);
     Eigen::Vector3f vt_direction(coefficients->values[3], coefficients->values[4], 0.f);
+
     // All projections will not be scaled
     vt_direction.normalize();
 
-    inliers = extractCluster(filtered, inliers);
+    inliers = extract_cluster(filtered, inliers);
 
     // Check result
     if (!inliers || inliers->indices.size() == 0)
@@ -88,9 +90,7 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::P
       PointT pt = filtered->points[inliers->indices[i]];
 
       // Compute distance
-      Eigen::Vector3f vt = pt.getVector3fMap();
-      Eigen::Vector3f vt_projected = vt_line + vt_direction*((vt - vt_line).dot(vt_direction));
-      double d = (vt-vt_projected).norm()*1000; // mm
+      double d = point_to_line_distance(pt.getVector3fMap(), vt_line, vt_direction);
       err.push_back(d);
 
       // Update statistics
@@ -173,57 +173,196 @@ std::vector<EdgeFeature::Ptr> LineBasedScanmatcher::edge_extraction(std::vector<
   return edges;
 }
 
+Eigen::Vector3f LineBasedScanmatcher::lines_intersection(LineFeature::Ptr line1, LineFeature::Ptr line2)
+{
+    // line1 represented as a1x + b1y = c1
+    double a1 = line1->pointB.y() - line1->pointA.y();
+    double b1 = line1->pointA.x() - line1->pointB.x();
+    double c1 = a1*(line1->pointA.x()) + b1*(line1->pointA.y());
+ 
+    // line2 represented as a2x + b2y = c2
+    double a2 = line2->pointB.y() - line2->pointA.y();
+    double b2 = line2->pointA.x() - line2->pointB.x();
+    double c2 = a2*(line2->pointA.x()) + b2*(line2->pointA.y());
+ 
+    double determinant = a1*b2 - a2*b1;
+ 
+    if (determinant == 0)
+    {
+      ROS_WARN("LineBasedScanmatcher found two parallel lines to intersect!");
+    }
+
+    double x = (b2*c1 - b1*c2)/determinant;
+    double y = (a1*c2 - a2*c1)/determinant;
+    return Eigen::Vector3f(x,y,0);
+
+}
+
 EdgeFeature::Ptr LineBasedScanmatcher::check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2){
 
-  // lines should be perpendicular
-  double cosine = (line1->PointA - line1->PointB).normalized().dot(
-                (line2->PointA - line2->PointB).normalized());
+  // lines should be almost perpendicular
+  double cosine = (line1->pointA - line1->pointB).normalized().dot(
+                  (line2->pointA - line2->pointB).normalized());
+
   if(std::abs(cosine) > 0.5){
     return nullptr;
   }
 
-  EdgeFeature::Ptr edge(new EdgeFeature());
-  edge = nullptr;
+  EdgeFeature::Ptr edge(nullptr);
 
-  if((line1->PointA - line2->PointA).norm() < 1.0){
-
+  if((line1->pointA - line2->pointA).norm() < 1.0){
+    // intersection point
+    Eigen::Vector3f edgePoint = lines_intersection(line1, line2);
     edge.reset(new EdgeFeature());
     *edge = {
-      line1->PointA,
-      line1,
-      line2
+      edgePoint,
+      line1->pointB,
+      line2->pointB
     };
 
-  } else if((line1->PointA - line2->PointB).norm() < 1.0){
-
+  } else if((line1->pointA - line2->pointB).norm() < 1.0){
+    // intersection point
+    Eigen::Vector3f edgePoint = lines_intersection(line1, line2);
     edge.reset(new EdgeFeature());
     *edge = {
-      line1->PointA,
-      line1,
-      line2
+      edgePoint,
+      line1->pointB,
+      line2->pointA
     };
 
-  } else if((line1->PointB - line2->PointA).norm() < 1.0){
-
+  } else if((line1->pointB - line2->pointA).norm() < 1.0){
+    // intersection point
+    Eigen::Vector3f edgePoint = lines_intersection(line1, line2);
     edge.reset(new EdgeFeature());
     *edge = {
-      line1->PointB,
-      line1,
-      line2
+      edgePoint,
+      line1->pointA,
+      line2->pointB
     };
 
-  } else if((line1->PointB - line2->PointB).norm() < 1.0){
-
+  } else if((line1->pointB - line2->pointB).norm() < 1.0){
+    // intersection point
+    Eigen::Vector3f edgePoint = lines_intersection(line1, line2);
     edge.reset(new EdgeFeature());
     *edge = {
-      line1->PointB,
-      line1,
-      line2
+      edgePoint,
+      line1->pointA,
+      line2->pointA
     };
 
   }
 
   return edge;
 }
+
+double LineBasedScanmatcher::angle_between_vectors(Eigen::Vector3f A, Eigen::Vector3f B){
+
+  double dot = A.x()*B.x() + A.y()*B.y(); // dot product between A and B
+  double det = A.x()*B.y() - A.y()*B.x(); // determinant
+  double angle = std::atan2(det, dot);    // atan2(y, x) or atan2(sin, cos)
+
+  return angle > 0 ?angle :2*M_PI+angle;  // [-π,+π] -> [0,2π]
+}
+
+Eigen::Matrix4f LineBasedScanmatcher::align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2){
+
+  Eigen::Vector3f side1A = edge1->pointA-edge1->edgePoint;
+  Eigen::Vector3f side1B = edge1->pointB-edge1->edgePoint;
+  Eigen::Vector3f side2A = edge2->pointA-edge2->edgePoint;
+  Eigen::Vector3f side2B = edge2->pointB-edge2->edgePoint;
+
+  double angle1 = angle_between_vectors(side1A, side2A);
+  double angle2 = angle_between_vectors(side1B, side2B);
+  double angle3 = angle_between_vectors(side1A, side2B);
+  double angle4 = angle_between_vectors(side1B, side2A);
+
+  double angle = 0.0;
+  if(std::abs(angle1-angle2) < std::abs(angle3-angle4)){
+    angle = (angle1+angle2)/2.0;
+  } else {
+    angle = (angle3+angle4)/2.0;
+  }
+
+  Eigen::Matrix3f rot;
+  rot = Eigen::AngleAxisf(0, Eigen::Vector3f::UnitX())
+    * Eigen::AngleAxisf(0, Eigen::Vector3f::UnitY())
+    * Eigen::AngleAxisf(angle, Eigen::Vector3f::UnitZ());
+
+  Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+  transform.block<3,1>(0,3) = edge2->edgePoint-rot*edge1->edgePoint;
+  transform.block<3,3>(0,0) = rot;
+
+  return transform;
+}
+
+double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3f point, Eigen::Vector3f line_point, Eigen::Vector3f line_direction){
+  line_direction.normalize();
+  Eigen::Vector3f projected_point = line_point + line_direction*((point - line_point).dot(line_direction));
+  return (point-projected_point).norm()*1000; // mm
+}
+
+double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3f point, LineFeature::Ptr line){
+
+  Eigen::Vector3f line_point = line->pointA;
+  Eigen::Vector3f line_direction = line->pointB - line->pointA;
+  line_direction.normalize();
+
+  Eigen::Vector3f projected_point = line_point + line_direction*((point - line_point).dot(line_direction));
+
+  float dot1 = (projected_point - line->pointA).dot(line->pointB - line->pointA);
+  float dot2 = (projected_point - line->pointB).dot(line->pointA - line->pointB);
+
+  if(dot1 < 0){
+    return (point - line->pointA).norm()*1000;
+  }
+
+  if(dot2 < 0){
+    return (point - line->pointB).norm()*1000;
+  }
+
+  return (point-projected_point).norm()*1000; // mm
+}
+
+double LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_src, LineFeature::Ptr line_trg){
+
+  Eigen::Vector3f line_src_point = line_src->pointA;
+  Eigen::Vector3f line_src_direction = (line_src->pointB - line_src->pointA).normalized();
+
+  const float sample_step = 0.02;
+  double distance = 0;
+  int num_points = 0;
+
+  double line_src_lenght = line_src->lenght();
+  for(float i=0; i<=line_src_lenght; i=i+sample_step) {
+    Eigen::Vector3f point = line_src_point + i*line_src_direction;
+    distance += point_to_line_distance(point, line_trg);
+    num_points++;
+  }
+
+  distance =  distance / num_points;
+
+  return distance;
+}
+
+double LineBasedScanmatcher::calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2){
+
+}
+
+LineFeature::Ptr LineBasedScanmatcher::nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud){
+
+  LineFeature::Ptr nearest_line = nullptr;
+  double nearest_distance = std::numeric_limits<double>::max();
+
+  for(LineFeature::Ptr cloud_line: cloud){
+    double distance = line_to_line_distance(line, cloud_line);
+    if(cloud_line != line && distance < nearest_distance){
+      nearest_line = cloud_line;
+      nearest_distance = distance;
+    }
+  }
+
+  return nearest_line;
+}
+
 
 }  // namespace hdl_graph_slam

@@ -128,7 +128,7 @@
     <!-- update params -->
     <param name="graph_update_interval" value="3.0" />
     <!-- delta params -->
-    <param name="delta_init_angle" value="-31" />
+    <param name="delta_init_angle" value="0" />
     <param name="delta_init_x" value="0" />
     <param name="delta_init_y" value="0" />
 

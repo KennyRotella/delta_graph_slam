@@ -218,17 +218,18 @@ private:
       alignTrans_flatCloud_to_buildCloud = transform3Dto2D(alignTrans_flatCloud_to_buildCloud3D).cast<double>();
 
       // TEST LINES
-      pcl::PointCloud<PointT>::Ptr cloud_lines(new pcl::PointCloud<PointT>());
-      cloud_lines->header = flat_cloud->header;
-      std::vector<LineFeature::Ptr> lines = line_based_scanmatcher->line_extraction(aligned);
-      std::vector<EdgeFeature::Ptr> edges = line_based_scanmatcher->edge_extraction(lines);
-      std::cout << "ASDASD" << edges.size() << std::endl;
-      for(EdgeFeature::Ptr edge : edges){
-        *cloud_lines += *interpolate(edge->lineA->PointA, edge->lineA->PointB);
-        *cloud_lines += *interpolate(edge->lineB->PointA, edge->lineB->PointB);
-      }
 
-      aligned_pub.publish(cloud_lines);
+      std::vector<LineFeature::Ptr> lines = line_based_scanmatcher->line_extraction(flat_cloud);
+      std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->line_extraction(trans_buildings_cloud);
+      LineFeature::Ptr nearest_line = line_based_scanmatcher->nearest_neighbor(lines[0], building_lines);
+
+      pcl::PointCloud<PointT>::Ptr cloud_edge(new pcl::PointCloud<PointT>());
+      cloud_edge->header = flat_cloud->header;
+
+      *cloud_edge += *interpolate(lines[0]->pointA, lines[0]->pointB);
+      *cloud_edge += *interpolate(nearest_line->pointA, nearest_line->pointB);
+
+      aligned_pub.publish(cloud_edge);
 
       // aligned->header = flat_cloud->header;
       // aligned_pub.publish(*aligned);
@@ -463,19 +464,13 @@ private:
 
         // TODO: local alignment
 
-        // transformation from estimated keyframe pose to building pose
-        // Eigen::Isometry2d kf_to_blding_trans = estimated_odom.inverse() * building->pose;
-
-        // g2o::OptimizableGraph::Edge* edge;
-        // edge = graph_slam->add_se2_edge(keyframe->node, building->node, kf_to_blding_trans, information);
-        // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
       }
-      g2o::OptimizableGraph::Edge* edge;
-      edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      // g2o::OptimizableGraph::Edge* edge;
+      // edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
+      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-      edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      // edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
+      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
       updated = true;
     }
