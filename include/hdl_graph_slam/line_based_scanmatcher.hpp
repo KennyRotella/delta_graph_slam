@@ -1,8 +1,6 @@
 #ifndef LINE_BASED_SCANMATCHER_HPP
 #define LINE_BASED_SCANMATCHER_HPP
 
-#include <hdl_graph_slam/ros_utils.hpp>
-
 #include <pcl_ros/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/ModelCoefficients.h>
@@ -25,8 +23,8 @@ namespace hdl_graph_slam {
 struct LineFeature {
   using Ptr = std::shared_ptr<LineFeature>;
 
-  Eigen::Vector3f PointA;
-  Eigen::Vector3f PointB;
+  Eigen::Vector3f pointA;
+  Eigen::Vector3f pointB;
 
   // RANSAC line fitting statistics
   double mean_error;
@@ -34,30 +32,32 @@ struct LineFeature {
   double max_error;
   double min_error;
 
-  float lenght(){ return (PointA-PointB).norm(); }
-  Eigen::Vector3f middlePoint(){ return PointA + (PointB-PointA)/2.f; }
+  float lenght(){ return (pointA-pointB).norm(); }
+  Eigen::Vector3f middlePoint(){ return pointA + (pointB-pointA)/2.f; }
 };
 
 struct EdgeFeature {
   using Ptr = std::shared_ptr<EdgeFeature>;
 
   Eigen::Vector3f edgePoint;
-  LineFeature::Ptr lineA;
-  LineFeature::Ptr lineB;
+  Eigen::Vector3f pointA;
+  Eigen::Vector3f pointB;
 };
 
 class LineBasedScanmatcher {
+  typedef pcl::PointXYZ PointT;
 
   public:
   // Base constructor using default values
   LineBasedScanmatcher():
-    min_cluster_size(30),
+    min_cluster_size(25),
     max_cluster_size(25000),
-    cluster_tolerance(1.5),
+    cluster_tolerance(1.0),
     sac_method_type(pcl::SAC_RANSAC),
-    sac_distance_threshold(0.250f),
+    sac_distance_threshold(0.100f),
+    max_iterations(500),
     merror_threshold(150.0),
-    line_lenght_threshold(2.5) {}
+    line_lenght_threshold(1.0) {}
 
   // Setter to customize algorithm parameter values
   void setMinClusterSize (double min_cluster_size) {this->min_cluster_size = min_cluster_size;};
@@ -74,13 +74,22 @@ class LineBasedScanmatcher {
   double cluster_tolerance;
   int sac_method_type;            // SAC_SEGMENTATION_METHOD
   double sac_distance_threshold;  // SAC_SEGMENTATION_DISTANCE_THRESHOLD
+  int max_iterations;             // max ransac number of iterations
   double merror_threshold;        // max mean error acceptance threshold
   double line_lenght_threshold;   // min line lenght acceptance threshold
   
-  pcl::PointIndices::Ptr extractCluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
+  pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
   std::vector<EdgeFeature::Ptr> edge_extraction(std::vector<LineFeature::Ptr> lines);
+  Eigen::Vector3f lines_intersection(LineFeature::Ptr line1, LineFeature::Ptr line2);
   EdgeFeature::Ptr check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2);
+  double angle_between_vectors(Eigen::Vector3f A, Eigen::Vector3f B);
+  Eigen::Matrix4f align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2);
+  double point_to_line_distance(Eigen::Vector3f point, Eigen::Vector3f line_point, Eigen::Vector3f line_direction);
+  double point_to_line_distance(Eigen::Vector3f point, LineFeature::Ptr line);
+  double line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
+  double calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2);
+  LineFeature::Ptr nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
 };
 
 }  // namespace hdl_graph_slam

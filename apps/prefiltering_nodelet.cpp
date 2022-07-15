@@ -125,7 +125,12 @@ private:
 
       tf::StampedTransform transform;
       tf_listener.waitForTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), ros::Duration(5.0));
-      tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
+      try {
+        tf_listener.lookupTransform(base_link_frame, src_cloud->header.frame_id, ros::Time(0), transform);
+      } catch(tf2::LookupException e){
+        std::cerr << e.what() << std::endl;
+        return;
+      }
 
       pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
       pcl_ros::transformPointCloud(*src_cloud, *transformed, transform);
