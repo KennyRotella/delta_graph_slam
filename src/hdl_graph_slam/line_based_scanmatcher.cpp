@@ -2,7 +2,7 @@
 
 namespace hdl_graph_slam {
 
-Eigen::Matrix4f LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget) {
+BestFitAlignment LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget) {
   
   std::vector<LineFeature::Ptr> linesSource = line_extraction(inputSource);
   std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
@@ -10,28 +10,40 @@ Eigen::Matrix4f LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr inputSo
   std::vector<LineFeature::Ptr> linesTarget = line_extraction(inputTarget);
   std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
 
-  double min_fitness_score = calc_fitness_score(linesSource, linesTarget);
-  Eigen::Matrix4f best_fit_transform = Eigen::Matrix4f::Identity();
+  BestFitAlignment result;
+  result.lines = linesSource;
+  result.transformation = Eigen::Matrix4f::Identity();
+  result.fitness_score = calc_fitness_score(linesSource, linesTarget);
 
+  if(edgesSource.size() == 0 || edgesTarget.size() == 0){
+    return result;
+  }
+
+  float max_distance = 5;
   for(EdgeFeature::Ptr edgeSource : edgesSource){
     for(EdgeFeature::Ptr edgeTarget : edgesTarget){
       Eigen::Matrix4f transform = align_edges(edgeSource, edgeTarget);
 
+      Eigen::Vector3f traslation = transform.block<3,1>(0,3);
+
+      double weight = 1 + std::min(max_distance,traslation.norm())/ max_distance;
+
       std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
-      double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget);
+      double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget) * weight;
 
-      if(fitness_score < min_fitness_score){
-        min_fitness_score = fitness_score;
-        best_fit_transform = transform;
+      if(fitness_score < result.fitness_score){
+        result.lines = linesSourceTransformed;
+        result.transformation = transform;
+        result.fitness_score = fitness_score;
 
-        std::cout << "FITNESS: " << min_fitness_score << std::endl;
+        std::cout << "FITNESS: " << fitness_score << std::endl;
       }
     }
   }
 
   std::cout << "END" << std::endl;
-  
-  return best_fit_transform;
+
+  return result;
 }
 
 pcl::PointIndices::Ptr LineBasedScanmatcher::extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
@@ -364,17 +376,20 @@ double LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_src, Li
 double LineBasedScanmatcher::calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2){
 
   double distance = 0;
+  double total_lenght = 0;
 
   for(LineFeature::Ptr cloud_line: cloud1){
     NearestNeighbor nn_line = nearest_neighbor(cloud_line, cloud2);
-    distance += nn_line.distance;
+    distance += nn_line.distance * cloud_line->lenght();
+    total_lenght += cloud_line->lenght();
   }
 
-  distance = distance / cloud1.size();
+  distance = distance / total_lenght;
+
   return distance;
 }
 
-NearestNeighbor LineBasedScanmatcher::nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud){
+LineBasedScanmatcher::NearestNeighbor LineBasedScanmatcher::nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud){
 
   NearestNeighbor nn_line;
   nn_line.nearest_neighbor = nullptr;

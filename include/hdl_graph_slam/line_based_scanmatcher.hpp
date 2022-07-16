@@ -44,13 +44,19 @@ struct EdgeFeature {
   Eigen::Vector3f pointB;
 };
 
-struct NearestNeighbor {
-  LineFeature::Ptr nearest_neighbor;
-  double distance;
+struct BestFitAlignment {
+  std::vector<LineFeature::Ptr> lines;
+  Eigen::Matrix4f transformation;
+  double fitness_score;
 };
 
 class LineBasedScanmatcher {
   typedef pcl::PointXYZ PointT;
+
+  struct NearestNeighbor {
+    LineFeature::Ptr nearest_neighbor;
+    double distance;
+  };
 
   public:
   // Base constructor using default values
@@ -74,17 +80,17 @@ class LineBasedScanmatcher {
   void setMerror_threshold (float merror_threshold) {this->merror_threshold = merror_threshold;};
   void setLine_lenght_threshold (float line_lenght_threshold) {this->line_lenght_threshold = line_lenght_threshold;};
   
-  Eigen::Matrix4f align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget);
+  BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget);
 
-  public:
+  private:
   int min_cluster_size;
   int max_cluster_size;
   float cluster_tolerance;
   int sac_method_type;            // SAC_SEGMENTATION_METHOD
-  float sac_distance_threshold;  // SAC_SEGMENTATION_DISTANCE_THRESHOLD
+  float sac_distance_threshold;   // SAC_SEGMENTATION_DISTANCE_THRESHOLD
   int max_iterations;             // max ransac number of iterations
-  float merror_threshold;        // max mean error acceptance threshold
-  float line_lenght_threshold;   // min line lenght acceptance threshold
+  float merror_threshold;         // max mean error acceptance threshold
+  float line_lenght_threshold;    // min line lenght acceptance threshold
   
   pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
