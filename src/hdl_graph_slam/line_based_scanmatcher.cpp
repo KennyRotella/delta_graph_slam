@@ -3,8 +3,35 @@
 namespace hdl_graph_slam {
 
 Eigen::Matrix4f LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget) {
-  //TODO: To Be Developed
-  return Eigen::Matrix4f::Identity();
+  
+  std::vector<LineFeature::Ptr> linesSource = line_extraction(inputSource);
+  std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
+
+  std::vector<LineFeature::Ptr> linesTarget = line_extraction(inputTarget);
+  std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
+
+  double min_fitness_score = calc_fitness_score(linesSource, linesTarget);
+  Eigen::Matrix4f best_fit_transform = Eigen::Matrix4f::Identity();
+
+  for(EdgeFeature::Ptr edgeSource : edgesSource){
+    for(EdgeFeature::Ptr edgeTarget : edgesTarget){
+      Eigen::Matrix4f transform = align_edges(edgeSource, edgeTarget);
+
+      std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
+      double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget);
+
+      if(fitness_score < min_fitness_score){
+        min_fitness_score = fitness_score;
+        best_fit_transform = transform;
+
+        std::cout << "FITNESS: " << min_fitness_score << std::endl;
+      }
+    }
+  }
+
+  std::cout << "END" << std::endl;
+  
+  return best_fit_transform;
 }
 
 pcl::PointIndices::Ptr LineBasedScanmatcher::extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers) {
@@ -249,7 +276,6 @@ EdgeFeature::Ptr LineBasedScanmatcher::check_edge(LineFeature::Ptr line1, LineFe
       line1->pointA,
       line2->pointA
     };
-
   }
 
   return edge;
@@ -325,44 +351,71 @@ double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3f point, LineF
 
 double LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_src, LineFeature::Ptr line_trg){
 
-  Eigen::Vector3f line_src_point = line_src->pointA;
-  Eigen::Vector3f line_src_direction = (line_src->pointB - line_src->pointA).normalized();
-
-  const float sample_step = 0.02;
   double distance = 0;
-  int num_points = 0;
 
-  double line_src_lenght = line_src->lenght();
-  for(float i=0; i<=line_src_lenght; i=i+sample_step) {
-    Eigen::Vector3f point = line_src_point + i*line_src_direction;
-    distance += point_to_line_distance(point, line_trg);
-    num_points++;
-  }
+  distance += point_to_line_distance(line_src->pointA, line_trg);
+  distance += point_to_line_distance(line_src->pointB, line_trg);
 
-  distance =  distance / num_points;
+  distance =  distance / 2;
 
   return distance;
 }
 
 double LineBasedScanmatcher::calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2){
 
+  double distance = 0;
+
+  for(LineFeature::Ptr cloud_line: cloud1){
+    NearestNeighbor nn_line = nearest_neighbor(cloud_line, cloud2);
+    distance += nn_line.distance;
+  }
+
+  distance = distance / cloud1.size();
+  return distance;
 }
 
-LineFeature::Ptr LineBasedScanmatcher::nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud){
+NearestNeighbor LineBasedScanmatcher::nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud){
 
-  LineFeature::Ptr nearest_line = nullptr;
-  double nearest_distance = std::numeric_limits<double>::max();
+  NearestNeighbor nn_line;
+  nn_line.nearest_neighbor = nullptr;
+  nn_line.distance = std::numeric_limits<double>::max();
 
   for(LineFeature::Ptr cloud_line: cloud){
     double distance = line_to_line_distance(line, cloud_line);
-    if(cloud_line != line && distance < nearest_distance){
-      nearest_line = cloud_line;
-      nearest_distance = distance;
+    if(cloud_line != line && distance < nn_line.distance){
+      nn_line.nearest_neighbor = cloud_line;
+      nn_line.distance = distance;
     }
   }
 
-  return nearest_line;
+  return nn_line;
 }
 
+std::vector<LineFeature::Ptr> LineBasedScanmatcher::transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4f transform){
+
+  std::vector<LineFeature::Ptr> transformed_lines;
+  LineFeature::Ptr transformed_line;
+
+  for(LineFeature::Ptr line : lines){
+    transformed_line.reset(new LineFeature());
+    *transformed_line = *line;
+
+    Eigen::Matrix4f lineA_trans = Eigen::Matrix4f::Identity();
+
+    lineA_trans.block<3,1>(0,3) = line->pointA;
+    lineA_trans = transform*lineA_trans;
+    transformed_line->pointA = lineA_trans.block<3,1>(0,3);
+
+    Eigen::Matrix4f lineB_trans = Eigen::Matrix4f::Identity();
+
+    lineB_trans.block<3,1>(0,3) = line->pointB;
+    lineB_trans = transform*lineB_trans;
+    transformed_line->pointB = lineB_trans.block<3,1>(0,3);
+
+    transformed_lines.push_back(transformed_line);
+  }
+
+  return transformed_lines;
+}
 
 }  // namespace hdl_graph_slam

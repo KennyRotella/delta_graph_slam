@@ -72,6 +72,25 @@ public:
     nmea_parser.reset(new NmeaSentenceParser());
     line_based_scanmatcher.reset(new LineBasedScanmatcher());
 
+    line_based_scanmatcher->setMinClusterSize(private_nh.param<int>("delta_MinClusterSize", 25));
+    line_based_scanmatcher->setMaxClusterSize(private_nh.param<int>("delta_MaxClusterSize", 25000));
+    line_based_scanmatcher->setClusterTolerance(private_nh.param<float>("delta_ClusterTolerance", 1.0));
+    line_based_scanmatcher->setSACDistanceThreshold(private_nh.param<float>("delta_SACDistanceThreshold", 0.1f));
+    line_based_scanmatcher->setMax_iterations(private_nh.param<int>("delta_Max_iterations", 500));
+    line_based_scanmatcher->setMerror_threshold(private_nh.param<float>("delta_Merror_threshold", 150.f));
+    line_based_scanmatcher->setLine_lenght_threshold(private_nh.param<float>("delta_lenght_threshold", 1.f));
+
+    line_based_scanmatcher->setSACMethodType(pcl::SAC_RANSAC);
+    std::string SACMethodType = private_nh.param<std::string>("delta_SACMethodType", "SAC_RANSAC");
+    std::string methods[] = {"SAC_RANSAC","SAC_LMEDS","SAC_MSAC","SAC_RRANSAC","SAC_RMSAC","SAC_MLESAC","SAC_PROSAC"};
+    for(int i=0; i<methods->size(); i++){
+      if(methods[i] == SACMethodType){
+        line_based_scanmatcher->setSACMethodType(i);
+        std::cout << "SACMethodType: " << SACMethodType << std::endl;
+        break;
+      }
+    }
+
     gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
     gps_edge_stddev_xy = private_nh.param<double>("gps_edge_stddev_xy", 10000.0);
 
@@ -94,6 +113,7 @@ public:
     buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/buildings_cloud", 16);
     target_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/target_buildings_cloud", 16);
     aligned_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/aligned_cloud", 16);
+    src_cloud_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/src_cloud_pub", 16);
     markers_pub = mt_nh.advertise<visualization_msgs::MarkerArray>("/delta_graph_slam/markers", 16);
     odom2map_pub = mt_nh.advertise<geometry_msgs::TransformStamped>("/delta_graph_slam/odom2pub", 16);
     read_until_pub = mt_nh.advertise<std_msgs::Header>("/delta_graph_slam/read_until", 32);
@@ -209,30 +229,45 @@ private:
       pcl::transformPointCloud(*buildings_cloud, *trans_buildings_cloud, transform2Dto3D(map_pose.inverse().matrix().cast<float>()));
       trans_buildings_cloud->header = flat_cloud->header;
 
-      registration->setInputSource(flat_cloud);
-      registration->setInputTarget(trans_buildings_cloud);
+      // registration->setInputSource(flat_cloud);
+      // registration->setInputTarget(trans_buildings_cloud);
 
       pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-      registration->align(*aligned);
-      Eigen::Matrix4f alignTrans_flatCloud_to_buildCloud3D = registration->getFinalTransformation();
-      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(alignTrans_flatCloud_to_buildCloud3D).cast<double>();
+      // registration->align(*aligned);
+      // Eigen::Matrix4f alignTrans_flatCloud_to_buildCloud3D = registration->getFinalTransformation();
+      // alignTrans_flatCloud_to_buildCloud = transform3Dto2D(alignTrans_flatCloud_to_buildCloud3D).cast<double>();
 
       // TEST LINES
 
-      std::vector<LineFeature::Ptr> lines = line_based_scanmatcher->line_extraction(flat_cloud);
-      std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->line_extraction(trans_buildings_cloud);
-      LineFeature::Ptr nearest_line = line_based_scanmatcher->nearest_neighbor(lines[0], building_lines);
+      Eigen::Matrix4f trans = line_based_scanmatcher->align(flat_cloud, trans_buildings_cloud);
+      pcl::transformPointCloud(*flat_cloud, *aligned, trans);
 
-      pcl::PointCloud<PointT>::Ptr cloud_edge(new pcl::PointCloud<PointT>());
-      cloud_edge->header = flat_cloud->header;
+      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(trans).cast<double>();
 
-      *cloud_edge += *interpolate(lines[0]->pointA, lines[0]->pointB);
-      *cloud_edge += *interpolate(nearest_line->pointA, nearest_line->pointB);
+      // std::vector<LineFeature::Ptr> lines = line_based_scanmatcher->line_extraction(flat_cloud);
+      // std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->line_extraction(trans_buildings_cloud);
 
-      aligned_pub.publish(cloud_edge);
+      // Eigen::Matrix4f trans = Eigen::Matrix4f::Identity();
+      // trans.block<1,3>(0,3) = Eigen::Vector3f(1,1,0);
+      // std::vector<LineFeature::Ptr> transformed_lines = line_based_scanmatcher->transform_lines(building_lines,trans);
 
-      // aligned->header = flat_cloud->header;
-      // aligned_pub.publish(*aligned);
+      // std::cout << "FITNESS: " << line_based_scanmatcher->calc_fitness_score(lines, building_lines) << std::endl;
+
+      // pcl::PointCloud<PointT>::Ptr cloud_edge(new pcl::PointCloud<PointT>());
+      // cloud_edge->header = flat_cloud->header;
+
+      // for(LineFeature::Ptr line : building_lines){
+      //   *cloud_edge += *interpolate(line->pointA, line->pointB);
+      // }
+
+      // for(LineFeature::Ptr line : transformed_lines){
+      //   *cloud_edge += *interpolate(line->pointA, line->pointB);
+      // }
+
+      src_cloud_pub.publish(flat_cloud);
+
+      aligned->header = flat_cloud->header;
+      aligned_pub.publish(*aligned);
 
     }
 
@@ -465,12 +500,12 @@ private:
         // TODO: local alignment
 
       }
-      // g2o::OptimizableGraph::Edge* edge;
-      // edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
-      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      g2o::OptimizableGraph::Edge* edge;
+      edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-      // edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
-      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
       updated = true;
     }
@@ -840,6 +875,7 @@ private:
   ros::Publisher buildings_pub;
   ros::Publisher target_buildings_pub;
   ros::Publisher aligned_pub;
+  ros::Publisher src_cloud_pub;
   ros::Publisher markers_pub;
 
   std::string map_frame_id;
