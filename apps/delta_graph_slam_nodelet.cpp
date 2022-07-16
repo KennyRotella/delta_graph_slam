@@ -229,40 +229,14 @@ private:
       pcl::transformPointCloud(*buildings_cloud, *trans_buildings_cloud, transform2Dto3D(map_pose.inverse().matrix().cast<float>()));
       trans_buildings_cloud->header = flat_cloud->header;
 
-      // registration->setInputSource(flat_cloud);
-      // registration->setInputTarget(trans_buildings_cloud);
+      BestFitAlignment result = line_based_scanmatcher->align(flat_cloud, trans_buildings_cloud);
 
       pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-      // registration->align(*aligned);
-      // Eigen::Matrix4f alignTrans_flatCloud_to_buildCloud3D = registration->getFinalTransformation();
-      // alignTrans_flatCloud_to_buildCloud = transform3Dto2D(alignTrans_flatCloud_to_buildCloud3D).cast<double>();
+      for(LineFeature::Ptr line : result.lines){
+        *aligned += *interpolate(line->pointA, line->pointB);
+      }
 
-      // TEST LINES
-
-      Eigen::Matrix4f trans = line_based_scanmatcher->align(flat_cloud, trans_buildings_cloud);
-      pcl::transformPointCloud(*flat_cloud, *aligned, trans);
-
-      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(trans).cast<double>();
-
-      // std::vector<LineFeature::Ptr> lines = line_based_scanmatcher->line_extraction(flat_cloud);
-      // std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->line_extraction(trans_buildings_cloud);
-
-      // Eigen::Matrix4f trans = Eigen::Matrix4f::Identity();
-      // trans.block<1,3>(0,3) = Eigen::Vector3f(1,1,0);
-      // std::vector<LineFeature::Ptr> transformed_lines = line_based_scanmatcher->transform_lines(building_lines,trans);
-
-      // std::cout << "FITNESS: " << line_based_scanmatcher->calc_fitness_score(lines, building_lines) << std::endl;
-
-      // pcl::PointCloud<PointT>::Ptr cloud_edge(new pcl::PointCloud<PointT>());
-      // cloud_edge->header = flat_cloud->header;
-
-      // for(LineFeature::Ptr line : building_lines){
-      //   *cloud_edge += *interpolate(line->pointA, line->pointB);
-      // }
-
-      // for(LineFeature::Ptr line : transformed_lines){
-      //   *cloud_edge += *interpolate(line->pointA, line->pointB);
-      // }
+      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(result.transformation).cast<double>();
 
       src_cloud_pub.publish(flat_cloud);
 
@@ -468,28 +442,10 @@ private:
 
     for(auto& keyframe : new_keyframes) {
       Eigen::Isometry3d relative_pose3D(transform2Dto3D(keyframe->alignTrans_flatCloud_to_buildCloud.matrix().cast<float>()).cast<double>());
-      Eigen::MatrixXd information = inf_calclator->calc_information_matrix_buildings(keyframe->flat_cloud, keyframe->buildings_cloud, relative_pose3D.inverse());
+      Eigen::MatrixXd information = Eigen::Matrix3d::Identity();
 
       Eigen::Isometry2d odom = odom2map * keyframe->odom2D;
       Eigen::Isometry2d estimated_odom = odom * keyframe->alignTrans_flatCloud_to_buildCloud;
-
-      // Eigen::Vector2d A = odom.translation();
-      // Eigen::Vector2d B = estimated_odom.translation();
-
-      // double dot = A.x()*B.x() + A.y()*B.y(); // dot product between A and B
-      // double det = A.x()*B.y() - A.y()*B.x(); // determinant
-      // double angle = std::atan2(det, dot);    // atan2(y, x) or atan2(sin, cos)
-
-      // double weight = inf_calclator->calc_fitness_score_buildings(keyframe->flat_cloud, keyframe->buildings_cloud, relative_pose3D.inverse(), 10.f);
-      // weight = weight > 0.01 ? 1.0 / weight : 100;
-      // weighted average between initial orientation estimations
-      // initial_orientation = initial_orientation * weight_estimates + (angle + Eigen::Rotation2Dd(odom2map.linear()).angle()) * weight;
-      // weight_estimates += weight;
-      // initial_orientation /= weight_estimates;
-      // std::cout << information << std::endl;
-      // std::cout << weight << std::endl;
-      // std::cout << initial_orientation * (180.f / M_PI) << std::endl;
-      // std::cout << angle * (180.f / M_PI) << std::endl;
     
       for(Building::Ptr building : keyframe->near_buildings){
         if(building->node == nullptr){
@@ -500,14 +456,21 @@ private:
         // TODO: local alignment
 
       }
-      g2o::OptimizableGraph::Edge* edge;
-      edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-      edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      if(keyframe->alignTrans_flatCloud_to_buildCloud.matrix() != Eigen::Matrix3d::Identity()){
+        g2o::OptimizableGraph::Edge* edge;
+        edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-      updated = true;
+        edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+
+        std::cout << keyframe->node->fixed() << std::endl;
+
+        updated = true;
+      } else {
+        std::cout << "Identity matrix is not a valid prior!" << std::endl;
+      }
     }
 
     std_msgs::Header read_until;
