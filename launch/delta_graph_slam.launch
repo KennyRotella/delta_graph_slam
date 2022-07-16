@@ -147,6 +147,19 @@
 
     <param name="delta_importance_ratio" value="1.0" />
     <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
+
+    <!-- delta line based scanmatching -->
+    <param name="delta_MinClusterSize" value="25" />
+    <param name="delta_MaxClusterSize" value="25000" />
+    <param name="delta_ClusterTolerance" value="1.3" />
+    <param name="delta_SACDistanceThreshold" value="0.2" />
+    <param name="delta_Max_iterations" value="200" />
+    <!-- merror is in millimeters -->
+    <param name="delta_Merror_threshold" value="180.0" />
+    <param name="delta_lenght_threshold" value="1.3" />
+    <!-- methods: SAC_RANSAC,SAC_LMEDS,SAC_MSAC,SAC_RRANSAC,SAC_RMSAC,SAC_MLESAC,SAC_PROSAC -->
+    <param name="delta_SACMethodType" value="SAC_MSAC" />
+
   </node>
   
   <node pkg="delta_graph_slam" type="map2odom_publisher.py" name="map2odom_publisher" />
