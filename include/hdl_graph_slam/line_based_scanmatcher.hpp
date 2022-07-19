@@ -23,8 +23,8 @@ namespace hdl_graph_slam {
 struct LineFeature {
   using Ptr = std::shared_ptr<LineFeature>;
 
-  Eigen::Vector3f pointA;
-  Eigen::Vector3f pointB;
+  Eigen::Vector3d pointA;
+  Eigen::Vector3d pointB;
 
   // RANSAC line fitting statistics
   double mean_error;
@@ -33,20 +33,20 @@ struct LineFeature {
   double min_error;
 
   float lenght(){ return (pointA-pointB).norm(); }
-  Eigen::Vector3f middlePoint(){ return pointA + (pointB-pointA)/2.f; }
+  Eigen::Vector3d middlePoint(){ return pointA + (pointB-pointA)/2.f; }
 };
 
 struct EdgeFeature {
   using Ptr = std::shared_ptr<EdgeFeature>;
 
-  Eigen::Vector3f edgePoint;
-  Eigen::Vector3f pointA;
-  Eigen::Vector3f pointB;
+  Eigen::Vector3d edgePoint;
+  Eigen::Vector3d pointA;
+  Eigen::Vector3d pointB;
 };
 
 struct BestFitAlignment {
   std::vector<LineFeature::Ptr> lines;
-  Eigen::Matrix4f transformation;
+  Eigen::Matrix4d transformation;
   double fitness_score;
 };
 
@@ -80,9 +80,11 @@ class LineBasedScanmatcher {
   void setMerror_threshold (float merror_threshold) {this->merror_threshold = merror_threshold;};
   void setLine_lenght_threshold (float line_lenght_threshold) {this->line_lenght_threshold = line_lenght_threshold;};
   
-  BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, pcl::PointCloud<PointT>::Ptr inputTarget);
+  BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, std::vector<LineFeature::Ptr> linesTarget);
+  BestFitAlignment align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget);
+  std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
 
-  private:
+  public:
   int min_cluster_size;
   int max_cluster_size;
   float cluster_tolerance;
@@ -95,16 +97,16 @@ class LineBasedScanmatcher {
   pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
   std::vector<EdgeFeature::Ptr> edge_extraction(std::vector<LineFeature::Ptr> lines);
-  Eigen::Vector3f lines_intersection(LineFeature::Ptr line1, LineFeature::Ptr line2);
+  Eigen::Vector3d lines_intersection(LineFeature::Ptr line1, LineFeature::Ptr line2);
   EdgeFeature::Ptr check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2);
-  double angle_between_vectors(Eigen::Vector3f A, Eigen::Vector3f B);
-  Eigen::Matrix4f align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2);
-  double point_to_line_distance(Eigen::Vector3f point, Eigen::Vector3f line_point, Eigen::Vector3f line_direction);
-  double point_to_line_distance(Eigen::Vector3f point, LineFeature::Ptr line);
+  double angle_between_vectors(Eigen::Vector3d A, Eigen::Vector3d B);
+  Eigen::Matrix4d align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2);
+  Eigen::Matrix4d align_lines(LineFeature::Ptr line1, LineFeature::Ptr line2);
+  double point_to_line_distance(Eigen::Vector3d point, Eigen::Vector3d line_point, Eigen::Vector3d line_direction);
+  double point_to_line_distance(Eigen::Vector3d point, LineFeature::Ptr line);
   double line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
   double calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2);
   NearestNeighbor nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
-  std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4f transform);
 };
 
 }  // namespace hdl_graph_slam

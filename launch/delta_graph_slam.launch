@@ -149,14 +149,14 @@
     <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
 
     <!-- delta line based scanmatching -->
-    <param name="delta_MinClusterSize" value="25" />
+    <param name="delta_MinClusterSize" value="20" />
     <param name="delta_MaxClusterSize" value="25000" />
-    <param name="delta_ClusterTolerance" value="1.2" />
-    <param name="delta_SACDistanceThreshold" value="0.20" />
-    <param name="delta_Max_iterations" value="100" />
+    <param name="delta_ClusterTolerance" value="1.4" />
+    <param name="delta_SACDistanceThreshold" value="0.25" />
+    <param name="delta_Max_iterations" value="50" />
     <!-- merror is in millimeters -->
-    <param name="delta_Merror_threshold" value="200.0" />
-    <param name="delta_lenght_threshold" value="1.5" />
+    <param name="delta_Merror_threshold" value="100.0" />
+    <param name="delta_lenght_threshold" value="2.5" />
     <!-- methods: SAC_RANSAC,SAC_LMEDS,SAC_MSAC,SAC_RRANSAC,SAC_RMSAC,SAC_MLESAC,SAC_PROSAC -->
     <param name="delta_SACMethodType" value="SAC_RANSAC" />
 

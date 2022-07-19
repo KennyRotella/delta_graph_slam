@@ -25,6 +25,8 @@
 #include <curlpp/Easy.hpp>
 #include <curlpp/Options.hpp>
 #include <curlpp/Exception.hpp>
+
+#include <hdl_graph_slam/line_based_scanmatcher.hpp>
 namespace pt = boost::property_tree;
 
 namespace hdl_graph_slam {
@@ -65,7 +67,7 @@ private:
 	Eigen::Vector2d zero_utm;
 	double radius;
 	double buffer_radius;
-	Eigen::Vector3f buffer_center;
+	Eigen::Vector3d buffer_center;
 	std::vector<Node> nodes;
 	pt::ptree xml_tree;
 	std::mutex xml_tree_mutex;
@@ -75,9 +77,9 @@ private:
 
 	void downloadBuildings(double lat, double lon);
 	std::vector<Building::Ptr> parseBuildings(double lat, double lon);
-	pcl::PointCloud<PointT>::Ptr buildPointCloud(std::vector<std::string> nd_refs);
+	Building::Ptr buildPointCloud(std::vector<std::string> nd_refs, Building::Ptr new_building);
 	Node getNode(std::string nd_ref);
-	PointT toEnu(Eigen::Vector3d lla);
+	Eigen::Vector3d toEnu(Eigen::Vector3d lla);
 	bool isBuildingInRadius(pt::ptree::value_type &tree_node, double lat, double lon);
 	Eigen::Isometry2d getBuildingPose(std::vector<std::string> nd_refs);
 };

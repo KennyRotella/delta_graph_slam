@@ -145,6 +145,8 @@ public:
       geometry_msgs::TransformStamped ts = matrix2transform(ros::Time::now(), trans.matrix().cast<float>(), map_frame_id, odom_frame_id);
       odom2map_pub.publish(ts);
     }
+
+    adjust_initial_orientation = true;
   }
 
 private:
@@ -156,6 +158,8 @@ private:
   void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg, 
                       const sensor_msgs::PointCloud2::ConstPtr& cloud_msg, 
                       const sensor_msgs::PointCloud2::ConstPtr& flat_cloud_msg) {
+    std::cout << "START_CALLBACK" << std::endl;
+    
                         
     if(!buildings_manager){
       ROS_WARN("Buildings manager not initialized yet!");
@@ -170,7 +174,8 @@ private:
       base_frame_id = cloud_msg->header.frame_id;
     }
 
-    if(!keyframe_updater->update(odom2D)) {
+    bool add_keyframe = keyframe_updater->update(odom2D);
+    if(!add_keyframe && !adjust_initial_orientation) {
       std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
       if(keyframe_queue.empty()) {
         std_msgs::Header read_until;
@@ -210,8 +215,15 @@ private:
     std::vector<Building::Ptr> buildings;
      
     buildings = buildings_manager->getBuildings(lla.latitude, lla.longitude);
-    Eigen::Isometry2d alignTrans_flatCloud_to_buildCloud;
+    Eigen::Isometry2d alignTrans_flatCloud_to_buildCloud = Eigen::Isometry2d::Identity();
+
     pcl::PointCloud<PointT>::Ptr trans_buildings_cloud(new pcl::PointCloud<PointT>);
+    trans_buildings_cloud->header = flat_cloud->header;
+
+    pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
+    aligned->header = flat_cloud->header;
+
+    BestFitAlignment result;
 
     // skip keyframe if there are no buildings within radius
     if(!buildings.empty()){
@@ -219,37 +231,57 @@ private:
       // buildings_cloud contains all buildings' cloud
       pcl::PointCloud<PointT>::Ptr buildings_cloud(new pcl::PointCloud<PointT>);
       buildings_cloud->header.frame_id = "map";
+      std::vector<LineFeature::Ptr> buildings_lines;
       for(Building::Ptr building : buildings){
         *(buildings_cloud) += *(building->cloud);
+        buildings_lines.insert(buildings_lines.end(), building->lines.begin(), building->lines.end());
       }
 
       target_buildings_pub.publish(*buildings_cloud);
 
       // building cloud transformed in velo_link frame
-      pcl::transformPointCloud(*buildings_cloud, *trans_buildings_cloud, transform2Dto3D(map_pose.inverse().matrix().cast<float>()));
-      trans_buildings_cloud->header = flat_cloud->header;
+      Eigen::Matrix4f trans = transform2Dto3D(map_pose.inverse().matrix().cast<float>());
+      buildings_lines = line_based_scanmatcher->transform_lines(buildings_lines, trans.cast<double>());
 
-      BestFitAlignment result = line_based_scanmatcher->align(flat_cloud, trans_buildings_cloud);
+      result = line_based_scanmatcher->align(flat_cloud, buildings_lines);
 
-      pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
       for(LineFeature::Ptr line : result.lines){
         *aligned += *interpolate(line->pointA, line->pointB);
       }
 
-      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(result.transformation).cast<double>();
+      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(result.transformation.cast<float>()).cast<double>();
+
+      if(adjust_initial_orientation && !add_keyframe){
+        Eigen::Matrix3f trans = trans_odom2map * alignTrans_flatCloud_to_buildCloud.matrix().cast<float>();
+
+        trans_odom2map_mutex.lock();
+        trans_odom2map = trans;
+        trans_odom2map_mutex.unlock();
+
+        std::cout << "CALLBACK TRANS: " << std::endl << trans << std::endl;
+
+        if(odom2map_pub.getNumSubscribers()) {
+          geometry_msgs::TransformStamped ts = matrix2transform(cloud_msg->header.stamp, trans.matrix(), map_frame_id, odom_frame_id);
+          odom2map_pub.publish(ts);
+        }
+      }
 
       src_cloud_pub.publish(flat_cloud);
-
-      aligned->header = flat_cloud->header;
-      aligned_pub.publish(*aligned);
-
+      aligned_pub.publish(aligned);
     }
 
-    double accum_d = keyframe_updater->get_accum_distance();
-    KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, alignTrans_flatCloud_to_buildCloud, accum_d, cloud, flat_cloud, trans_buildings_cloud, buildings));
+    if(add_keyframe){
+      std::cout << "ADD KEYFRAME" << std::endl;
+      double accum_d = keyframe_updater->get_accum_distance();
+      adjust_initial_orientation = accum_d == 0;
 
-    std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
-    keyframe_queue.push_back(keyframe);
+      KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, alignTrans_flatCloud_to_buildCloud, accum_d, cloud, aligned, result, buildings));
+
+      std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
+      keyframe_queue.push_back(keyframe);
+    }
+
+    std::cout << "END_CALLBACK" << std::endl;
   }
 
   void nmea_callback(const nmea_msgs::SentenceConstPtr& nmea_msg) {
@@ -441,6 +473,12 @@ private:
     trans_odom2map_mutex.unlock();
 
     for(auto& keyframe : new_keyframes) {
+
+      if(keyframe->aligned_lines.fitness_score > 2500){
+        std::cout << "Fitness score is not below theshold!" << std::endl;
+        continue;
+      }
+
       Eigen::Isometry3d relative_pose3D(transform2Dto3D(keyframe->alignTrans_flatCloud_to_buildCloud.matrix().cast<float>()).cast<double>());
       Eigen::MatrixXd information = Eigen::Matrix3d::Identity();
 
@@ -450,27 +488,21 @@ private:
       for(Building::Ptr building : keyframe->near_buildings){
         if(building->node == nullptr){
           building->node = graph_slam->add_se2_node(building->pose);
-          building->node->setFixed(true);
+          building->node->setFixed(false);
         }
 
-        // TODO: local alignment
+        // BestFitAlignment result = line_based_scanmatcher->align(keyframe->flat_cloud, building->cloud);
 
       }
 
-      if(keyframe->alignTrans_flatCloud_to_buildCloud.matrix() != Eigen::Matrix3d::Identity()){
-        g2o::OptimizableGraph::Edge* edge;
-        edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
-        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      g2o::OptimizableGraph::Edge* edge;
+      edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-        edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
-        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-        std::cout << keyframe->node->fixed() << std::endl;
-
-        updated = true;
-      } else {
-        std::cout << "Identity matrix is not a valid prior!" << std::endl;
-      }
+      updated = true;
     }
 
     std_msgs::Header read_until;
@@ -575,6 +607,7 @@ private:
     keyframes_snapshot_mutex.unlock();
 
     if(odom2map_pub.getNumSubscribers()) {
+      std::cout << "Transform: " << std::endl << trans.matrix() << std::endl;
       geometry_msgs::TransformStamped ts = matrix2transform(keyframe->stamp, trans.matrix().cast<float>(), map_frame_id, odom_frame_id);
       odom2map_pub.publish(ts);
     }
@@ -825,6 +858,7 @@ private:
 
   boost::shared_ptr<tf2_ros::Buffer> tf_buffer;
   boost::shared_ptr<tf2_ros::TransformListener> tf_listener;
+  bool adjust_initial_orientation;
 
   std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> odom_sub;
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
