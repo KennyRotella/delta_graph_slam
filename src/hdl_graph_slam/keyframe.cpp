@@ -16,8 +16,8 @@ KeyFrame::KeyFrame(const ros::Time& stamp,
   double accum_distance,
   const pcl::PointCloud<PointT>::ConstPtr& cloud,
   const pcl::PointCloud<PointT>::ConstPtr& flat_cloud,
-  const pcl::PointCloud<PointT>::ConstPtr& buildings_cloud,
-  std::vector<Building::Ptr> near_buildings) : stamp(stamp), odom(odom), odom2D(odom2D), alignTrans_flatCloud_to_buildCloud(alignTrans_flatCloud_to_buildCloud), accum_distance(accum_distance), cloud(cloud), flat_cloud(flat_cloud), buildings_cloud(buildings_cloud), near_buildings(near_buildings), node(nullptr) {}
+  BestFitAlignment aligned_lines,
+  std::vector<Building::Ptr> near_buildings) : stamp(stamp), odom(odom), odom2D(odom2D), alignTrans_flatCloud_to_buildCloud(alignTrans_flatCloud_to_buildCloud), accum_distance(accum_distance), cloud(cloud), flat_cloud(flat_cloud), aligned_lines(aligned_lines), near_buildings(near_buildings), node(nullptr) {}
 
 KeyFrame::~KeyFrame() {}
 

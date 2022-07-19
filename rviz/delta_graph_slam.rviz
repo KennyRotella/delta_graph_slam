@@ -5,6 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /TF1/Frames1
+        - /TargetBuildingsCloud1
         - /MarkerArray1/Namespaces1
       Splitter Ratio: 0.5
     Tree Height: 667
@@ -131,7 +132,7 @@ Visualization Manager:
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.10000000149011612
+      Size (m): 0.05000000074505806
       Style: Flat Squares
       Topic: /delta_graph_slam/target_buildings_cloud
       Unreliable: false
@@ -335,7 +336,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 12.543999671936035
+      Scale: 14.634422302246094
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
       X: 0

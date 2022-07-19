@@ -1,4 +1,4 @@
-#include "hdl_graph_slam/building_tools.hpp"
+#include <hdl_graph_slam/building_tools.hpp>
 
 namespace hdl_graph_slam {
 
@@ -32,7 +32,7 @@ std::vector<Building::Ptr> BuildingTools::getBuildingNodes() {
 
 void BuildingTools::downloadBuildings(double lat, double lon) {
 
-	Eigen::Vector3f pointXYZ = toEnu(Eigen::Vector3d(lat, lon, 0)).getVector3fMap();
+	Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(lat, lon, 0));
 	if(!xml_tree.empty() && (pointXYZ - buffer_center).norm() < (2.0/3.0 * buffer_radius)){
 		return;
 	}
@@ -89,7 +89,7 @@ void BuildingTools::downloadBuildings(double lat, double lon) {
 	std::lock_guard<std::mutex> lock(xml_tree_mutex);
 	nodes = nodes_tmp;
 	xml_tree = xml_tree_tmp;
-	buffer_center = toEnu(Eigen::Vector3d(lat, lon, 0)).getVector3fMap();
+	buffer_center = toEnu(Eigen::Vector3d(lat, lon, 0));
 }
 
 std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon) {
@@ -114,7 +114,7 @@ std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon)
 				continue;
 			}
 
-			Building::Ptr new_building(new Building);
+			Building::Ptr new_building(new Building());
 			std::vector<std::string> nd_refs;
 
 			BOOST_FOREACH(pt::ptree::value_type &tree_node_2, tree_node.second) {
@@ -125,8 +125,7 @@ std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon)
 			}
 			new_building->id = id;
 			new_building->pose = getBuildingPose(nd_refs);
-			pcl::PointCloud<PointT>::Ptr building_pointcloud(buildPointCloud(nd_refs));
-			new_building->cloud = building_pointcloud;
+			buildPointCloud(nd_refs, new_building);
 
 			buildings_in_range.push_back(new_building);
 			buildings.push_back(new_building);
@@ -138,28 +137,34 @@ std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon)
 	return buildings_in_range;
 }
 
-pcl::PointCloud<PointT>::Ptr BuildingTools::buildPointCloud(std::vector<std::string> nd_refs) {
-	pcl::PointCloud<PointT>::Ptr building_pointcloud(new pcl::PointCloud<PointT>);
-	Eigen::Vector3d previous;
-	int first = 1;
-	for(std::string nd_ref : nd_refs) {
-		Node node = getNode(nd_ref);
-		Eigen::Vector3d pointXYZ;
-		pointXYZ(0) = node.lat;
-		pointXYZ(1) = node.lon;
-		pointXYZ(2) = 0;
-		if(first) {
-			first = 0;
-			previous = pointXYZ;
-		} else {
-			*building_pointcloud += *(interpolate(toEnu(previous), toEnu(pointXYZ)));
-			previous = pointXYZ;
-		}
-	}
-	building_pointcloud->header.frame_id = "map";
-	pcl_conversions::toPCL(ros::Time::now(), building_pointcloud->header.stamp);
+Building::Ptr BuildingTools::buildPointCloud(std::vector<std::string> nd_refs, Building::Ptr new_building) {
+	new_building->cloud.reset(new pcl::PointCloud<PointT>);
 
-	return building_pointcloud;
+	if(nd_refs.size() == 0){
+		return new_building;
+	}
+
+	Node node = getNode(nd_refs[0]);
+	Eigen::Vector3d previous = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+
+	for(int i = 1; i < nd_refs.size(); i++) {
+		node = getNode(nd_refs[i]);
+		Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+
+		LineFeature::Ptr line(new LineFeature());
+		line->pointA = previous;
+		line->pointB = pointXYZ;
+
+		new_building->lines.push_back(line);
+		*(new_building->cloud) += *interpolate(previous, pointXYZ);
+
+		previous = pointXYZ;
+	}
+
+	new_building->cloud->header.frame_id = "map";
+	pcl_conversions::toPCL(ros::Time::now(), new_building->cloud->header.stamp);
+
+	return new_building;
 }
 
 BuildingTools::Node BuildingTools::getNode(std::string nd_ref) {
@@ -172,7 +177,7 @@ BuildingTools::Node BuildingTools::getNode(std::string nd_ref) {
 }
 
 // toEnu converts to enu coordinates from lla
-PointT BuildingTools::toEnu(Eigen::Vector3d lla) {
+Eigen::Vector3d BuildingTools::toEnu(Eigen::Vector3d lla) {
 	geographic_msgs::GeoPoint gps_msg;
 	geodesy::UTMPoint utm;
 
@@ -181,12 +186,7 @@ PointT BuildingTools::toEnu(Eigen::Vector3d lla) {
 	gps_msg.altitude = 0;
 	geodesy::fromMsg(gps_msg, utm);
 
-	PointT pointXYZ;
-	pointXYZ.x = utm.easting-zero_utm(0);
-	pointXYZ.y = utm.northing-zero_utm(1);
-	pointXYZ.z = 0.f;
-	
-	return pointXYZ;
+	return Eigen::Vector3d(utm.easting-zero_utm(0), utm.northing-zero_utm(1), 0.f);
 }
 
 bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, double lat, double lon){
@@ -195,8 +195,8 @@ bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, d
 		if(tree_node.first == "nd") {
 			std::string nd_ref = tree_node.second.get<std::string>("<xmlattr>.ref");
 			Node node = getNode(nd_ref);
-			Eigen::Vector3f pointXYZ = toEnu(Eigen::Vector3d(node.lat, node.lon, 0)).getVector3fMap();
-			Eigen::Vector3f enu_coords = toEnu(Eigen::Vector3d(lat, lon, 0)).getVector3fMap();
+			Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+			Eigen::Vector3d enu_coords = toEnu(Eigen::Vector3d(lat, lon, 0));
 
 			if((pointXYZ-enu_coords).norm() < radius){
 				return true;
@@ -213,19 +213,19 @@ bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, d
  * @return isometry2d with null orientation
  */
 Eigen::Isometry2d BuildingTools::getBuildingPose(std::vector<std::string> nd_refs){
-	float x_min = std::numeric_limits<float>::max();
-	float x_max = std::numeric_limits<float>::lowest();
-	float y_min = std::numeric_limits<float>::max();
-	float y_max = std::numeric_limits<float>::lowest();
+	double x_min = std::numeric_limits<double>::max();
+	double x_max = std::numeric_limits<double>::lowest();
+	double y_min = std::numeric_limits<double>::max();
+	double y_max = std::numeric_limits<double>::lowest();
 
 	for(std::string nd_ref : nd_refs) {
 		Node node = getNode(nd_ref);
-		PointT enu_coords = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+		Eigen::Vector3d enu_coords = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
 		
-		x_min = enu_coords.x < x_min ? enu_coords.x : x_min;
-		x_max = enu_coords.x > x_max ? enu_coords.x : x_max;
-		y_min = enu_coords.y < y_min ? enu_coords.y : y_min;
-		y_max = enu_coords.y > y_max ? enu_coords.y : y_max;
+		x_min = enu_coords.x() < x_min ? enu_coords.x() : x_min;
+		x_max = enu_coords.x() > x_max ? enu_coords.x() : x_max;
+		y_min = enu_coords.y() < y_min ? enu_coords.y() : y_min;
+		y_max = enu_coords.y() > y_max ? enu_coords.y() : y_max;
 	}
 
 	// take middle point as building pose	

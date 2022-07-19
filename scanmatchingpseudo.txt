@@ -1,5 +1,0 @@
-for edge1 : current_edges
-  for edge2 : target_edges
-    transform = match(edge1, edge2)
-    count = count_matches(current_edges, target_edges, transform)
-    if(count > threshold) break

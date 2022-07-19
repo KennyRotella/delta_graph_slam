@@ -35,7 +35,7 @@ public:
     double accum_distance,
     const pcl::PointCloud<PointT>::ConstPtr& cloud,
     const pcl::PointCloud<PointT>::ConstPtr& flat_cloud,
-    const pcl::PointCloud<PointT>::ConstPtr& buildings_cloud,
+    BestFitAlignment aligned_lines,
     std::vector<Building::Ptr> near_buildings);
   virtual ~KeyFrame();
 
@@ -50,7 +50,7 @@ public:
   double accum_distance;                                  // accumulated distance from the first node (by scan_matching_odometry)
   pcl::PointCloud<PointT>::ConstPtr cloud;                // point cloud
   pcl::PointCloud<PointT>::ConstPtr flat_cloud;           // 2D flattened point cloud
-  pcl::PointCloud<PointT>::ConstPtr buildings_cloud;      // 2D near buildings point cloud
+  BestFitAlignment aligned_lines;                         // 2D flattened point cloud lines
   std::vector<Building::Ptr> near_buildings;              // buildings found in proximity
   boost::optional<Eigen::Vector2d> utm_coord;             // UTM coord obtained by GPS
 
