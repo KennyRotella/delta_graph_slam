@@ -143,7 +143,7 @@
     <param name="delta_max_stddev_x" value="5.0" />
     <param name="delta_min_stddev_q" value="0.05" />
     <param name="delta_max_stddev_q" value="0.2" />
-    <param name="delta_avg_fitness_score" value="2.0" />
+    <param name="delta_avg_fitness_score" value="1.25" />
 
     <param name="delta_importance_ratio" value="1.0" />
     <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
@@ -155,7 +155,7 @@
     <param name="delta_SACDistanceThreshold" value="0.25" />
     <param name="delta_Max_iterations" value="50" />
     <!-- merror is in millimeters -->
-    <param name="delta_Merror_threshold" value="100.0" />
+    <param name="delta_Merror_threshold" value="0.1" />
     <param name="delta_lenght_threshold" value="2.5" />
     <!-- methods: SAC_RANSAC,SAC_LMEDS,SAC_MSAC,SAC_RRANSAC,SAC_RMSAC,SAC_MLESAC,SAC_PROSAC -->
     <param name="delta_SACMethodType" value="SAC_RANSAC" />

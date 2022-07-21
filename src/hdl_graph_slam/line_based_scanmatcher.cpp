@@ -8,36 +8,42 @@ BestFitAlignment LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr cloudS
   return align(linesSource, linesTarget);
 }
 
-BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget) {
+BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment) {
 
-  std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
-  std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
+  double max_range = local_alignment ?3.0 :std::numeric_limits<double>::max();
+  double max_distance = local_alignment ?1.0 :3.0;
+  double min_cosine = 0.9;
 
   BestFitAlignment result;
   result.lines = linesSource;
   result.transformation = Eigen::Matrix4d::Identity();
-  result.fitness_score = calc_fitness_score(linesSource, linesTarget);
+  result.fitness_score = calc_fitness_score(linesSource, linesTarget, max_range);
 
-  double max_distance;
-  double min_cosine;
+  std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
+  std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
 
   std::cout << "START" << std::endl;
 
-  max_distance = 3;
   for(EdgeFeature::Ptr edgeSource : edgesSource){
     for(EdgeFeature::Ptr edgeTarget : edgesTarget){
 
-      if((edgeSource->edgePoint - edgeTarget->edgePoint).norm() > max_distance){
-        continue;
+      Eigen::Matrix4d transform;
+      if(local_alignment){
+        transform = align_edges(edgeSource, edgeTarget, M_PI/9);
+      } else {
+        transform = align_edges(edgeSource, edgeTarget);
       }
 
-      Eigen::Matrix4d transform = align_edges(edgeSource, edgeTarget);
       Eigen::Vector3d traslation = transform.block<3,1>(0,3);
+
+      if(traslation.norm() > max_distance){
+        continue;
+      }
 
       double weight = 1 + 0.5 * std::min(max_distance,traslation.norm()) / max_distance;
 
       std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
-      double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget) * weight;
+      double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range) * weight;
 
       if(fitness_score < result.fitness_score){
         result.lines = linesSourceTransformed;
@@ -49,8 +55,6 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
     }
   }
 
-  max_distance = 1.f;
-  min_cosine = 0.9f;
   for(LineFeature::Ptr lineSource : linesSource){
 
     NearestNeighbor nn_lineTarget = nearest_neighbor(lineSource, linesTarget);
@@ -59,7 +63,7 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
     Eigen::Vector3d trgLine = (nn_lineTarget.nearest_neighbor->pointA - nn_lineTarget.nearest_neighbor->pointB).normalized();
 
     double cosine = srcLine.dot(trgLine);
-    if(cosine < min_cosine){
+    if(std::abs(cosine) < min_cosine){
       continue;
     }
 
@@ -73,7 +77,7 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
     double weight = 1 + 0.3 * std::min(max_distance,traslation.norm()) / max_distance;
 
     std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
-    double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget);
+    double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
 
     if(fitness_score < result.fitness_score){
       result.lines = linesSourceTransformed;
@@ -81,7 +85,6 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
       result.fitness_score = fitness_score;
 
       std::cout << "LINE FITNESS: " << fitness_score << std::endl;
-
     }
   }
 
@@ -319,7 +322,7 @@ double LineBasedScanmatcher::angle_between_vectors(Eigen::Vector3d A, Eigen::Vec
   return angle > 0 ?angle :2*M_PI+angle;  // [-π,+π] -> [0,2π]
 }
 
-Eigen::Matrix4d LineBasedScanmatcher::align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2){
+Eigen::Matrix4d LineBasedScanmatcher::align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2, double max_angle){
 
   Eigen::Vector3d side1A = edge1->pointA-edge1->edgePoint;
   Eigen::Vector3d side1B = edge1->pointB-edge1->edgePoint;
@@ -336,6 +339,10 @@ Eigen::Matrix4d LineBasedScanmatcher::align_edges(EdgeFeature::Ptr edge1, EdgeFe
     angle = (angle1+angle2)/2.0;
   } else {
     angle = (angle3+angle4)/2.0;
+  }
+
+  if(angle > max_angle){
+    return Eigen::Matrix4d::Identity();
   }
 
   Eigen::Matrix3d rot;
@@ -355,6 +362,16 @@ Eigen::Matrix4d LineBasedScanmatcher::align_lines(LineFeature::Ptr line1, LineFe
   Eigen::Matrix4d transform = Eigen::Matrix4d::Identity();
   double angle = angle_between_vectors(line1->pointA - line1->pointB, line2->pointA - line2->pointB);
 
+  // [0,2π] -> [-π,+π] 
+  angle = angle < M_PI ?angle :angle-2*M_PI;
+
+  // use the smallest angle between two vectors
+  if(angle > M_PI / 2){
+    angle -= M_PI;
+  } else if(angle < -M_PI / 2){
+    angle += M_PI;
+  }
+
   Eigen::Vector3d line_point = line2->pointA;
   Eigen::Vector3d line_direction = (line2->pointA - line2->pointB).normalized();
   Eigen::Vector3d projected_point = line_point + line_direction*((line1->pointA - line_point).dot(line_direction));
@@ -373,7 +390,7 @@ Eigen::Matrix4d LineBasedScanmatcher::align_lines(LineFeature::Ptr line1, LineFe
 double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3d point, Eigen::Vector3d line_point, Eigen::Vector3d line_direction){
   line_direction.normalize();
   Eigen::Vector3d projected_point = line_point + line_direction*((point - line_point).dot(line_direction));
-  return (point-projected_point).norm()*1000; // mm
+  return (point-projected_point).norm();
 }
 
 double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3d point, LineFeature::Ptr line){
@@ -388,14 +405,14 @@ double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3d point, LineF
   double dot2 = (projected_point - line->pointB).dot(line->pointA - line->pointB);
 
   if(dot1 < 0){
-    return (point - line->pointA).norm()*1000;
+    return (point - line->pointA).norm();
   }
 
   if(dot2 < 0){
-    return (point - line->pointB).norm()*1000;
+    return (point - line->pointB).norm();
   }
 
-  return (point-projected_point).norm()*1000; // mm
+  return (point-projected_point).norm(); 
 }
 
 double LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_src, LineFeature::Ptr line_trg){
@@ -410,18 +427,23 @@ double LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_src, Li
   return distance;
 }
 
-double LineBasedScanmatcher::calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2){
+double LineBasedScanmatcher::calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range){
 
   double distance = 0;
   double total_lenght = 0;
 
   for(LineFeature::Ptr cloud_line: cloud1){
     NearestNeighbor nn_line = nearest_neighbor(cloud_line, cloud2);
-    distance += nn_line.distance * cloud_line->lenght();
-    total_lenght += cloud_line->lenght();
+    if(nn_line.distance < max_range){
+      distance += nn_line.distance * cloud_line->lenght();
+      total_lenght += cloud_line->lenght();
+    }
   }
 
-  distance = distance / total_lenght;
+  if(total_lenght > 0)
+    distance = distance / total_lenght;
+  else
+    distance = std::numeric_limits<double>::max();
 
   return distance;
 }

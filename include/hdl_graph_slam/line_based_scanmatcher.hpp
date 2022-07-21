@@ -81,7 +81,7 @@ class LineBasedScanmatcher {
   void setLine_lenght_threshold (float line_lenght_threshold) {this->line_lenght_threshold = line_lenght_threshold;};
   
   BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, std::vector<LineFeature::Ptr> linesTarget);
-  BestFitAlignment align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget);
+  BestFitAlignment align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false);
   std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
 
   public:
@@ -100,12 +100,12 @@ class LineBasedScanmatcher {
   Eigen::Vector3d lines_intersection(LineFeature::Ptr line1, LineFeature::Ptr line2);
   EdgeFeature::Ptr check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2);
   double angle_between_vectors(Eigen::Vector3d A, Eigen::Vector3d B);
-  Eigen::Matrix4d align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2);
+  Eigen::Matrix4d align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2, double max_angle=2*M_PI);
   Eigen::Matrix4d align_lines(LineFeature::Ptr line1, LineFeature::Ptr line2);
   double point_to_line_distance(Eigen::Vector3d point, Eigen::Vector3d line_point, Eigen::Vector3d line_direction);
   double point_to_line_distance(Eigen::Vector3d point, LineFeature::Ptr line);
   double line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
-  double calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2);
+  double calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range = std::numeric_limits<double>::max());
   NearestNeighbor nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
 };
 

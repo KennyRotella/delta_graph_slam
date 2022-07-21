@@ -49,9 +49,11 @@ void BuildingTools::downloadBuildings(double lat, double lon) {
 
 		curlpp::Easy request;
 		curlpp::options::Url url_opt(url);
+		curlpp::options::Timeout timeout(3);
 
 		// Setting the URL to retrive.
 		request.setOpt(url_opt);
+		request.setOpt(timeout);
 
 		std::ostringstream os;
 		os << request;
