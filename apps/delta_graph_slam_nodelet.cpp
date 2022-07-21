@@ -158,11 +158,9 @@ private:
   void cloud_callback(const nav_msgs::OdometryConstPtr& odom_msg, 
                       const sensor_msgs::PointCloud2::ConstPtr& cloud_msg, 
                       const sensor_msgs::PointCloud2::ConstPtr& flat_cloud_msg) {
-    std::cout << "START_CALLBACK" << std::endl;
-    
                         
     if(!buildings_manager){
-      ROS_WARN("Buildings manager not initialized yet!");
+      std::cout << "Buildings manager not initialized yet!" << std::endl;
       return;
     }
 
@@ -258,8 +256,6 @@ private:
         trans_odom2map = trans;
         trans_odom2map_mutex.unlock();
 
-        std::cout << "CALLBACK TRANS: " << std::endl << trans << std::endl;
-
         if(odom2map_pub.getNumSubscribers()) {
           geometry_msgs::TransformStamped ts = matrix2transform(cloud_msg->header.stamp, trans.matrix(), map_frame_id, odom_frame_id);
           odom2map_pub.publish(ts);
@@ -271,7 +267,6 @@ private:
     }
 
     if(add_keyframe){
-      std::cout << "ADD KEYFRAME" << std::endl;
       double accum_d = keyframe_updater->get_accum_distance();
       adjust_initial_orientation = accum_d == 0;
 
@@ -280,8 +275,6 @@ private:
       std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
       keyframe_queue.push_back(keyframe);
     }
-
-    std::cout << "END_CALLBACK" << std::endl;
   }
 
   void nmea_callback(const nmea_msgs::SentenceConstPtr& nmea_msg) {
@@ -474,35 +467,55 @@ private:
 
     for(auto& keyframe : new_keyframes) {
 
-      if(keyframe->aligned_lines.fitness_score > 2500){
-        std::cout << "Fitness score is not below theshold!" << std::endl;
+      if(keyframe->aligned_lines.fitness_score > 3.0){
         continue;
       }
 
       Eigen::Isometry3d relative_pose3D(transform2Dto3D(keyframe->alignTrans_flatCloud_to_buildCloud.matrix().cast<float>()).cast<double>());
-      Eigen::MatrixXd information = Eigen::Matrix3d::Identity();
 
       Eigen::Isometry2d odom = odom2map * keyframe->odom2D;
       Eigen::Isometry2d estimated_odom = odom * keyframe->alignTrans_flatCloud_to_buildCloud;
+
+      Eigen::Matrix4d odom_trans = transform2Dto3D(odom.matrix().inverse().cast<float>()).cast<double>();
     
       for(Building::Ptr building : keyframe->near_buildings){
         if(building->node == nullptr){
           building->node = graph_slam->add_se2_node(building->pose);
-          building->node->setFixed(false);
+          building->node->setFixed(true);
         }
 
-        // BestFitAlignment result = line_based_scanmatcher->align(keyframe->flat_cloud, building->cloud);
+        std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, odom_trans);
+
+        BestFitAlignment result = line_based_scanmatcher->align(building_lines, keyframe->aligned_lines.lines, true);
+        Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
+
+        if(result.fitness_score > 2.0){
+          continue;
+        }
+
+        Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score);
+        Eigen::Isometry2d relpose = estimated_odom.inverse() * building->pose * trans;
+
+        // std::cout << "FITNESS: " << std::endl << result.fitness_score << std::endl;
+        // std::cout << "INFORMATION: " << std::endl << information_matrix << std::endl;
+        // std::cout << "TRANS: " << std::endl << trans.matrix() << std::endl;
+
+        auto edge = graph_slam->add_se2_edge(keyframe->node, building->node, relpose, information_matrix);
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
+
+        updated = true;
 
       }
 
-      g2o::OptimizableGraph::Edge* edge;
-      edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information.block<2,2>(0,0));
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      // Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->aligned_lines.fitness_score);
 
-      edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information.block<1,1>(2,2));
-      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      // g2o::OptimizableGraph::Edge* edge;
+      // edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information_matrix.block<2,2>(0,0));
+      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-      updated = true;
+      // edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information_matrix.block<1,1>(2,2));
+      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+
     }
 
     std_msgs::Header read_until;
@@ -607,7 +620,6 @@ private:
     keyframes_snapshot_mutex.unlock();
 
     if(odom2map_pub.getNumSubscribers()) {
-      std::cout << "Transform: " << std::endl << trans.matrix() << std::endl;
       geometry_msgs::TransformStamped ts = matrix2transform(keyframe->stamp, trans.matrix().cast<float>(), map_frame_id, odom_frame_id);
       odom2map_pub.publish(ts);
     }
