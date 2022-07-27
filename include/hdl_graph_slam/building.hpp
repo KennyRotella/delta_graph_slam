@@ -4,9 +4,11 @@
 #include <iostream>
 #include <string>
 #include <Eigen/Dense>
-#include <pcl/io/pcd_io.h>
 
 #include <hdl_graph_slam/line_based_scanmatcher.hpp>
+#include <g2o/types/slam2d/vertex_se2.h>
+#include <pcl/common/transforms.h>
+#include <hdl_graph_slam/ros_utils.hpp>
 
 namespace g2o {
 class VertexSE2;
@@ -15,11 +17,14 @@ class VertexSE2;
 namespace hdl_graph_slam {
 
 class Building {
+	public:
 	typedef pcl::PointXYZ PointT;
-public:
 	typedef boost::shared_ptr<Building> Ptr;
 
 	Building(void);
+	pcl::PointCloud<PointT>::Ptr getCloud();
+	std::vector<LineFeature::Ptr> getLines();
+	Eigen::Isometry2d estimate() const;
 
 	std::string id;
 	Eigen::Isometry2d pose;					// pose (estimated by OpenStreetMap)
@@ -27,7 +32,6 @@ public:
 	std::vector<LineFeature::Ptr> lines;
 
 	g2o::VertexSE2* node;  					// node instance
-
 };
 
 }	 // namespace hdl_graph_slam

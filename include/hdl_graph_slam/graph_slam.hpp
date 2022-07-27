@@ -135,7 +135,7 @@ public:
   /**
    * @brief perform graph optimization
    */
-  int optimize(int num_iterations);
+  int optimize(int num_iterations, int level=0);
 
   /**
    * @brief save the pose graph to a file

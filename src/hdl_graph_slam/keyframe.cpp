@@ -12,12 +12,12 @@ namespace hdl_graph_slam {
 KeyFrame::KeyFrame(const ros::Time& stamp,
   const Eigen::Isometry3d& odom,
   const Eigen::Isometry2d& odom2D,
-  const Eigen::Isometry2d& alignTrans_flatCloud_to_buildCloud,
+  const Eigen::Isometry2d& estimated_odom,
   double accum_distance,
   const pcl::PointCloud<PointT>::ConstPtr& cloud,
   const pcl::PointCloud<PointT>::ConstPtr& flat_cloud,
   BestFitAlignment aligned_lines,
-  std::vector<Building::Ptr> near_buildings) : stamp(stamp), odom(odom), odom2D(odom2D), alignTrans_flatCloud_to_buildCloud(alignTrans_flatCloud_to_buildCloud), accum_distance(accum_distance), cloud(cloud), flat_cloud(flat_cloud), aligned_lines(aligned_lines), near_buildings(near_buildings), node(nullptr) {}
+  std::vector<Building::Ptr> near_buildings) : stamp(stamp), odom(odom), odom2D(odom2D), estimated_odom(estimated_odom), accum_distance(accum_distance), cloud(cloud), flat_cloud(flat_cloud), aligned_lines(aligned_lines), near_buildings(near_buildings), node(nullptr) {}
 
 KeyFrame::~KeyFrame() {}
 
