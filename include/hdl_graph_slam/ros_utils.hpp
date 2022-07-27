@@ -47,7 +47,7 @@ Eigen::Matrix4f transform2Dto3D(Eigen::Matrix3f trans2D);
 
 Eigen::Matrix3f transform3Dto2D(Eigen::Matrix4f trans3D);
 
-pcl::PointCloud<PointT>::Ptr interpolate(Eigen::Vector3d a, Eigen::Vector3d b);
+pcl::PointCloud<PointT>::Ptr interpolate(Eigen::Vector3f a, Eigen::Vector3f b);
 
 }  // namespace hdl_graph_slam
 

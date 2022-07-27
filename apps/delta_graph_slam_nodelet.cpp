@@ -42,6 +42,9 @@
 #include <g2o/types/slam2d/vertex_se2.h>
 #include <g2o/edge_se2_priorxy.hpp>
 #include <g2o/edge_se2_priorquat.hpp>
+#include <g2o/core/optimizable_graph.h>
+#include <g2o/core/sparse_optimizer.h>
+
 
 namespace hdl_graph_slam {
 
@@ -213,7 +216,7 @@ private:
     std::vector<Building::Ptr> buildings;
      
     buildings = buildings_manager->getBuildings(lla.latitude, lla.longitude);
-    Eigen::Isometry2d alignTrans_flatCloud_to_buildCloud = Eigen::Isometry2d::Identity();
+    Eigen::Isometry2d estimated_odom = map_pose;
 
     pcl::PointCloud<PointT>::Ptr trans_buildings_cloud(new pcl::PointCloud<PointT>);
     trans_buildings_cloud->header = flat_cloud->header;
@@ -226,31 +229,34 @@ private:
     // skip keyframe if there are no buildings within radius
     if(!buildings.empty()){
       
-      // buildings_cloud contains all buildings' cloud
       pcl::PointCloud<PointT>::Ptr buildings_cloud(new pcl::PointCloud<PointT>);
       buildings_cloud->header.frame_id = "map";
+
       std::vector<LineFeature::Ptr> buildings_lines;
+
       for(Building::Ptr building : buildings){
         *(buildings_cloud) += *(building->cloud);
-        buildings_lines.insert(buildings_lines.end(), building->lines.begin(), building->lines.end());
+        std::vector<LineFeature::Ptr> b_lines = building->lines;
+        buildings_lines.insert(buildings_lines.end(), b_lines.begin(), b_lines.end());
       }
-
-      target_buildings_pub.publish(*buildings_cloud);
 
       // building cloud transformed in velo_link frame
-      Eigen::Matrix4f trans = transform2Dto3D(map_pose.inverse().matrix().cast<float>());
-      buildings_lines = line_based_scanmatcher->transform_lines(buildings_lines, trans.cast<double>());
+      Eigen::Matrix4f map_pose_inv = transform2Dto3D(map_pose.inverse().matrix().cast<float>());
+      buildings_lines = line_based_scanmatcher->transform_lines(buildings_lines, map_pose_inv.cast<double>());
 
-      result = line_based_scanmatcher->align(flat_cloud, buildings_lines);
+      // the alignment is local when adding a new keyframe
+      // the assumption is that the lidar is very accurate after the initial orietation has been fixed
+      result = line_based_scanmatcher->align(flat_cloud, buildings_lines, add_keyframe);
 
       for(LineFeature::Ptr line : result.lines){
-        *aligned += *interpolate(line->pointA, line->pointB);
+        *aligned += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
       }
 
-      alignTrans_flatCloud_to_buildCloud = transform3Dto2D(result.transformation.cast<float>()).cast<double>();
+      Eigen::Matrix3d odom_trans = transform3Dto2D(result.transformation.cast<float>()).cast<double>();
+      estimated_odom = map_pose * odom_trans;
 
-      if(adjust_initial_orientation && !add_keyframe){
-        Eigen::Matrix3f trans = trans_odom2map * alignTrans_flatCloud_to_buildCloud.matrix().cast<float>();
+      if(adjust_initial_orientation){
+        Eigen::Matrix3f trans = (odom2map * odom_trans).matrix().cast<float>();
 
         trans_odom2map_mutex.lock();
         trans_odom2map = trans;
@@ -262,15 +268,28 @@ private:
         }
       }
 
-      src_cloud_pub.publish(flat_cloud);
+      // better publishing the already transformed clouds
+      pcl::PointCloud<PointT>::Ptr trans_cloud(new pcl::PointCloud<PointT>);
+
+      pcl::transformPointCloud(*flat_cloud, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
+      trans_cloud->header = flat_cloud->header;
+      trans_cloud->header.frame_id = "map";
+      src_cloud_pub.publish(trans_cloud);
+
+
+      pcl::transformPointCloud(*aligned, *trans_buildings_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
+      trans_cloud->header = aligned->header;
+      trans_cloud->header.frame_id = "map";
       aligned_pub.publish(aligned);
+      
+      target_buildings_pub.publish(*buildings_cloud);
     }
 
     if(add_keyframe){
       double accum_d = keyframe_updater->get_accum_distance();
       adjust_initial_orientation = accum_d == 0;
 
-      KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, alignTrans_flatCloud_to_buildCloud, accum_d, cloud, aligned, result, buildings));
+      KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, estimated_odom, accum_d, cloud, aligned, result, buildings));
 
       std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
       keyframe_queue.push_back(keyframe);
@@ -380,6 +399,7 @@ private:
         g2o::OptimizableGraph::Edge* edge;
         Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / gps_edge_stddev_xy;
         edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, xy, information_matrix);
+        edge->setLevel(0);
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("gps_edge_robust_kernel", "NONE"), private_nh.param<double>("gps_edge_robust_kernel_size", 1.0));
 
         updated = true;
@@ -447,6 +467,7 @@ private:
       Eigen::Isometry2d relative_pose2D = keyframe->odom2D.inverse() * prev_keyframe->odom2D;
       Eigen::MatrixXd information = inf_calclator->calc_information_matrix(keyframe->cloud, prev_keyframe->cloud, relative_pose);
       auto edge = graph_slam->add_se2_edge(keyframe->node, prev_keyframe->node, relative_pose2D, information);
+      edge->setLevel(0);
       graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("odometry_edge_robust_kernel", "NONE"), private_nh.param<double>("odometry_edge_robust_kernel_size", 1.0));
     }
 
@@ -471,50 +492,45 @@ private:
         continue;
       }
 
-      Eigen::Isometry3d relative_pose3D(transform2Dto3D(keyframe->alignTrans_flatCloud_to_buildCloud.matrix().cast<float>()).cast<double>());
-
       Eigen::Isometry2d odom = odom2map * keyframe->odom2D;
-      Eigen::Isometry2d estimated_odom = odom * keyframe->alignTrans_flatCloud_to_buildCloud;
+      Eigen::Isometry2d estimated_odom = keyframe->estimated_odom;
 
-      Eigen::Matrix4d odom_trans = transform2Dto3D(odom.matrix().inverse().cast<float>()).cast<double>();
-    
       for(Building::Ptr building : keyframe->near_buildings){
         if(building->node == nullptr){
           building->node = graph_slam->add_se2_node(building->pose);
-          building->node->setFixed(true);
+          building->node->setFixed(false);
         }
 
-        std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, odom_trans);
+        Eigen::Matrix4d odom_matrix = transform2Dto3D(odom.matrix().cast<float>()).cast<double>();
+        std::vector<LineFeature::Ptr> aligned_lines = line_based_scanmatcher->transform_lines(keyframe->aligned_lines.lines, odom_matrix);
 
-        BestFitAlignment result = line_based_scanmatcher->align(building_lines, keyframe->aligned_lines.lines, true);
+        BestFitAlignment result = line_based_scanmatcher->align(building->getLines(), aligned_lines, true, 4.0);
         Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
 
-        if(result.fitness_score > 2.0){
+        if(result.fitness_score > 2.5){
           continue;
         }
 
         Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score);
         Eigen::Isometry2d relpose = estimated_odom.inverse() * building->pose * trans;
 
-        // std::cout << "FITNESS: " << std::endl << result.fitness_score << std::endl;
-        // std::cout << "INFORMATION: " << std::endl << information_matrix << std::endl;
-        // std::cout << "TRANS: " << std::endl << trans.matrix() << std::endl;
-
         auto edge = graph_slam->add_se2_edge(keyframe->node, building->node, relpose, information_matrix);
+        edge->setLevel(1);
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
 
         updated = true;
-
       }
 
-      // Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->aligned_lines.fitness_score);
+      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->aligned_lines.fitness_score);
 
-      // g2o::OptimizableGraph::Edge* edge;
-      // edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information_matrix.block<2,2>(0,0));
-      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      g2o::OptimizableGraph::Edge* edge;
+      edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information_matrix.block<2,2>(0,0));
+      edge->setLevel(0);
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
-      // edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information_matrix.block<1,1>(2,2));
-      // graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
+      edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information_matrix.block<1,1>(2,2));
+      edge->setLevel(0);
+      graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
 
     }
 
@@ -544,7 +560,7 @@ private:
     // create pointcloud of all buildings
     pcl::PointCloud<PointT> buildings_cloud;
     for(Building::Ptr building : new_buildings){
-      buildings_cloud += *(building->cloud);
+      buildings_cloud += *(building->getCloud());
     }
 
     // publish buildings cloud
@@ -588,6 +604,7 @@ private:
       Eigen::Isometry2d relpose2D(loop->relative_pose2D.cast<double>());
       Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix(loop->key1->cloud, loop->key2->cloud, relpose);
       auto edge = graph_slam->add_se2_edge(loop->key1->node, loop->key2->node, relpose2D, information_matrix);
+      edge->setLevel(0);
       graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("loop_closure_edge_robust_kernel", "NONE"), private_nh.param<double>("loop_closure_edge_robust_kernel_size", 1.0));
     }
 
@@ -603,7 +620,21 @@ private:
 
     // optimize the pose graph
     int num_iterations = private_nh.param<int>("g2o_solver_num_iterations", 1024);
-    graph_slam->optimize(num_iterations);
+
+    // update only keyframes nodes
+    for(auto& keyframe : keyframes){
+      keyframe->node->setFixed(false);
+    }
+
+    graph_slam->optimize(num_iterations, 0);
+
+    // update building nodes having fixed keyframes nodes
+    for(auto& keyframe : keyframes){
+      keyframe->node->setFixed(true);
+    }
+
+    graph_slam->optimize(num_iterations, 1);
+
 
     // publish tf
     const auto& keyframe = keyframes.back();
@@ -680,7 +711,7 @@ private:
     build_marker.points.resize(buildings.size());
     build_marker.colors.resize(buildings.size());
     for(int i = 0; i < buildings.size(); i++) {
-      Eigen::Vector2d pos = buildings[i]->node->estimate().translation();
+      Eigen::Vector2d pos = buildings[i]->estimate().translation();
       build_marker.points[i].x = pos.x();
       build_marker.points[i].y = pos.y();
       build_marker.points[i].z = 0;
@@ -848,7 +879,7 @@ private:
       // create pointcloud of all buildings
       pcl::PointCloud<PointT> buildings_cloud;
       for(Building::Ptr building : new_buildings){
-        buildings_cloud += *(building->cloud);
+        buildings_cloud += *(building->getCloud());
       }
 
       buildings_cloud.header.frame_id = map_frame_id;

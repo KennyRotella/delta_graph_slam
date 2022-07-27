@@ -158,7 +158,7 @@ Building::Ptr BuildingTools::buildPointCloud(std::vector<std::string> nd_refs, B
 		line->pointB = pointXYZ;
 
 		new_building->lines.push_back(line);
-		*(new_building->cloud) += *interpolate(previous, pointXYZ);
+		*(new_building->cloud) += *interpolate(previous.cast<float>(), pointXYZ.cast<float>());
 
 		previous = pointXYZ;
 	}

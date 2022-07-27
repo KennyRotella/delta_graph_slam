@@ -2,17 +2,16 @@
 
 namespace hdl_graph_slam {
 
-BestFitAlignment LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget) {
+BestFitAlignment LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment, double max_range) {
   
   std::vector<LineFeature::Ptr> linesSource = line_extraction(cloudSource);
-  return align(linesSource, linesTarget);
+  return align(linesSource, linesTarget, local_alignment, max_range);
 }
 
-BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment) {
+BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment, double max_range) {
 
-  double max_range = local_alignment ?3.0 :std::numeric_limits<double>::max();
-  double max_distance = local_alignment ?1.0 :3.0;
-  double min_cosine = 0.9;
+  double max_distance = 3.5;
+  double min_cosine = 0.8;
 
   BestFitAlignment result;
   result.lines = linesSource;
@@ -22,7 +21,7 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
   std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
   std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
 
-  std::cout << "START" << std::endl;
+  std::cout << "START " << (local_alignment ? "LOCAL" : "GLOBAL") << std::endl;
 
   for(EdgeFeature::Ptr edgeSource : edgesSource){
     for(EdgeFeature::Ptr edgeTarget : edgesTarget){
@@ -34,13 +33,13 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
         transform = align_edges(edgeSource, edgeTarget);
       }
 
-      Eigen::Vector3d traslation = transform.block<3,1>(0,3);
+      Eigen::Vector3d translation = transform.block<3,1>(0,3);
 
-      if(traslation.norm() > max_distance){
+      if(translation.norm() > max_distance || transform == Eigen::Matrix4d::Identity()){
         continue;
       }
 
-      double weight = 1 + 0.5 * std::min(max_distance,traslation.norm()) / max_distance;
+      double weight = 1 + 0.3 * std::min(max_distance,translation.norm()) / max_distance;
 
       std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
       double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range) * weight;
@@ -68,16 +67,16 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
     }
 
     Eigen::Matrix4d transform = align_lines(lineSource, nn_lineTarget.nearest_neighbor);
-    Eigen::Vector3d traslation = transform.block<3,1>(0,3);
+    Eigen::Vector3d translation = transform.block<3,1>(0,3);
 
-    if(traslation.norm() > max_distance){
+    if(translation.norm() > max_distance){
       continue;
     }
 
-    double weight = 1 + 0.3 * std::min(max_distance,traslation.norm()) / max_distance;
+    double weight = 1 + 0.3 * std::min(max_distance,translation.norm()) / max_distance;
 
     std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
-    double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
+    double fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range) * weight;
 
     if(fitness_score < result.fitness_score){
       result.lines = linesSourceTransformed;

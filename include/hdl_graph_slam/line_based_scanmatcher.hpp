@@ -80,9 +80,9 @@ class LineBasedScanmatcher {
   void setMerror_threshold (float merror_threshold) {this->merror_threshold = merror_threshold;};
   void setLine_lenght_threshold (float line_lenght_threshold) {this->line_lenght_threshold = line_lenght_threshold;};
   
-  BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, std::vector<LineFeature::Ptr> linesTarget);
-  BestFitAlignment align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false);
-  std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
+  BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false, double max_range = std::numeric_limits<double>::max());
+  BestFitAlignment align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false, double max_range = std::numeric_limits<double>::max());
+  static std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
 
   public:
   int min_cluster_size;

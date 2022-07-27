@@ -31,7 +31,7 @@ public:
   KeyFrame(const ros::Time& stamp,
     const Eigen::Isometry3d& odom,
     const Eigen::Isometry2d& odom2D,
-    const Eigen::Isometry2d& alignTrans_flatCloud_to_buildCloud,
+    const Eigen::Isometry2d& estimated_odom,
     double accum_distance,
     const pcl::PointCloud<PointT>::ConstPtr& cloud,
     const pcl::PointCloud<PointT>::ConstPtr& flat_cloud,
@@ -46,7 +46,7 @@ public:
   ros::Time stamp;                                        // timestamp
   Eigen::Isometry3d odom;                                 // odometry (estimated by scan_matching_odometry)
   Eigen::Isometry2d odom2D;                               // odometry (used for pose graph 2D)
-  Eigen::Isometry2d alignTrans_flatCloud_to_buildCloud;   // scan matching final pose between flat_cloud and buildings cloud
+  Eigen::Isometry2d estimated_odom;                       // transfored odom after scan matching between flat_cloud and buildings cloud
   double accum_distance;                                  // accumulated distance from the first node (by scan_matching_odometry)
   pcl::PointCloud<PointT>::ConstPtr cloud;                // point cloud
   pcl::PointCloud<PointT>::ConstPtr flat_cloud;           // 2D flattened point cloud

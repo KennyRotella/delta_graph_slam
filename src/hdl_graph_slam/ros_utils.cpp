@@ -143,12 +143,12 @@ Eigen::Matrix3f transform3Dto2D(Eigen::Matrix4f trans3D){
   return trans2D;
 }
 
-pcl::PointCloud<PointT>::Ptr interpolate(Eigen::Vector3d a, Eigen::Vector3d b) {
+pcl::PointCloud<PointT>::Ptr interpolate(Eigen::Vector3f a, Eigen::Vector3f b) {
 	// linear interpolation: return a line of points between a and b (1 every 2cm)
 	const float sample_step = 0.02;
 	pcl::PointCloud<PointT>::Ptr building_pointcloud(new pcl::PointCloud<PointT>);
-	Eigen::Vector3d AtoB = b-a;
-	Eigen::Vector3d AtoBnormalized = AtoB.normalized();
+	Eigen::Vector3f AtoB = b-a;
+	Eigen::Vector3f AtoBnormalized = AtoB.normalized();
 	float AtoBnorm = AtoB.norm();
 
 	for(float i=0; i<=AtoBnorm; i=i+sample_step) {

@@ -335,13 +335,13 @@ void GraphSLAM::add_robust_kernel(g2o::HyperGraph::Edge* edge, const std::string
   edge_->setRobustKernel(kernel);
 }
 
-int GraphSLAM::optimize(int num_iterations) {
+int GraphSLAM::optimize(int num_iterations, int level) {
   g2o::SparseOptimizer* graph = dynamic_cast<g2o::SparseOptimizer*>(this->graph.get());
   if(graph->edges().size() < 10) {
     return -1;
   }
 
-  graph->initializeOptimization();
+  graph->initializeOptimization(level);
   graph->setVerbose(false);
 
   double chi2 = graph->chi2();
