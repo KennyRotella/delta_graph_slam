@@ -21,15 +21,17 @@ class Building {
 	typedef pcl::PointXYZ PointT;
 	typedef boost::shared_ptr<Building> Ptr;
 
-	Building(void);
+	Building(g2o::VertexSE2* node);
 	pcl::PointCloud<PointT>::Ptr getCloud();
 	std::vector<LineFeature::Ptr> getLines();
+	std::vector<Eigen::Vector3d> getPoints();
 	Eigen::Isometry2d estimate() const;
 
 	std::string id;
 	Eigen::Isometry2d pose;					// pose (estimated by OpenStreetMap)
 	pcl::PointCloud<PointT>::Ptr cloud;
 	std::vector<LineFeature::Ptr> lines;
+	std::vector<Eigen::Vector3d> points;
 
 	g2o::VertexSE2* node;  					// node instance
 };

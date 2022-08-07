@@ -5,7 +5,6 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /TF1/Frames1
-        - /TargetBuildingsCloud1
         - /MarkerArray1/Namespaces1
       Splitter Ratio: 0.5
     Tree Height: 667
@@ -99,13 +98,13 @@ Visualization Manager:
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
-      Name: BuildingsCloud
+      Name: Map
       Position Transformer: XYZ
       Queue Size: 10
       Selectable: true
       Size (Pixels): 1
-      Size (m): 0.019999999552965164
-      Style: Points
+      Size (m): 0.07999999821186066
+      Style: Squares
       Topic: /delta_graph_slam/buildings_cloud
       Unreliable: false
       Use Fixed Frame: true
@@ -299,6 +298,34 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 252; 233; 79
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: OverlappedBuildings
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.10000000149011612
+      Style: Flat Squares
+      Topic: /delta_graph_slam/overlapped_buildings_cloud
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48
@@ -336,7 +363,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 14.634422302246094
+      Scale: 17.32265281677246
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
       X: 0

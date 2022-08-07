@@ -2,7 +2,7 @@
 
 namespace hdl_graph_slam {
 	
-Building::Building(void) {cloud=nullptr; node=nullptr;}
+Building::Building(g2o::VertexSE2* node): cloud(nullptr), node(node) {}
 
 pcl::PointCloud<Building::PointT>::Ptr Building::getCloud(){
   if(node == nullptr)
@@ -35,6 +35,29 @@ std::vector<LineFeature::Ptr> Building::getLines(){
   buildings_lines = LineBasedScanmatcher::transform_lines(lines, trans3D);
 
   return buildings_lines;
+}
+
+std::vector<Eigen::Vector3d> Building::getPoints(){
+  if(node == nullptr)
+    return points;
+
+  Eigen::Matrix3d trans = (pose.inverse() * node->estimate().toIsometry()).matrix();
+
+  // transformation is in building frame, this will change it to map frame
+  trans.block<2,1>(0,2) += pose.translation() - trans.block<2,2>(0,0) * pose.translation();
+  Eigen::Matrix4d trans3D = transform2Dto3D(trans.cast<float>()).cast<double>();
+
+  std::vector<Eigen::Vector3d> transformed_points;
+  for(Eigen::Vector3d point: points){
+    Eigen::Matrix4d point_trans = Eigen::Matrix4d::Identity();
+
+    point_trans.block<3,1>(0,3) = point;
+    point_trans = trans3D*point_trans;
+
+    transformed_points.push_back(point_trans.block<3,1>(0,3));
+  }
+
+  return transformed_points;
 }
 
 Eigen::Isometry2d Building::estimate() const {
