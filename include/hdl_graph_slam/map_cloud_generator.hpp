@@ -15,7 +15,7 @@ namespace hdl_graph_slam {
  */
 class MapCloudGenerator {
 public:
-  using PointT = pcl::PointXYZI;
+  using PointT = pcl::PointXYZ;
 
   MapCloudGenerator();
   ~MapCloudGenerator();

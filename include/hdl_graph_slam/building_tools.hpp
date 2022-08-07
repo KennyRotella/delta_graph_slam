@@ -8,6 +8,7 @@
 #include <boost/thread/thread.hpp>
 #include <hdl_graph_slam/building.hpp>
 #include <hdl_graph_slam/ros_utils.hpp>
+#include <hdl_graph_slam/graph_slam.hpp>
 #include <pcl/common/distances.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -48,11 +49,11 @@ class BuildingTools {
 public:
 	typedef boost::shared_ptr<BuildingTools> Ptr;
 	BuildingTools() {}
-	BuildingTools(std::string host, Eigen::Vector2d zero_utm, double radius=35, double buffer_radius=100):
+	BuildingTools(std::string host, Eigen::Vector2d zero_utm, GraphSLAM* graph_slam, double radius=35, double buffer_radius=100):
 		host(host),
 		zero_utm(zero_utm),
 		radius(radius),
-		buffer_radius(buffer_radius) {}
+		buffer_radius(buffer_radius) { this->graph_slam.reset(graph_slam); }
 	std::vector<Building::Ptr> getBuildings(double lat, double lon);
 	std::vector<Building::Ptr> getBuildings(){ return buildings; };
 	std::vector<Building::Ptr> getBuildingNodes();
@@ -74,6 +75,7 @@ private:
 	boost::thread async_handle;
 	std::map<std::string,Building::Ptr> buildings_map;
 	std::vector<Building::Ptr> buildings;
+	std::unique_ptr<GraphSLAM> graph_slam;
 
 	void downloadBuildings(double lat, double lon);
 	std::vector<Building::Ptr> parseBuildings(double lat, double lon);

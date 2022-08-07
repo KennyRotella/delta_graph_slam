@@ -116,7 +116,6 @@ std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon)
 				continue;
 			}
 
-			Building::Ptr new_building(new Building());
 			std::vector<std::string> nd_refs;
 
 			BOOST_FOREACH(pt::ptree::value_type &tree_node_2, tree_node.second) {
@@ -125,8 +124,15 @@ std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon)
 					nd_refs.push_back(nd_ref);
 				}
 			}
+
+			Eigen::Isometry2d pose = getBuildingPose(nd_refs);
+			g2o::VertexSE2* node = graph_slam->add_se2_node(pose);
+			node->setFixed(false);
+
+			Building::Ptr new_building(new Building(node));
+
 			new_building->id = id;
-			new_building->pose = getBuildingPose(nd_refs);
+			new_building->pose = pose;
 			buildPointCloud(nd_refs, new_building);
 
 			buildings_in_range.push_back(new_building);
@@ -148,10 +154,12 @@ Building::Ptr BuildingTools::buildPointCloud(std::vector<std::string> nd_refs, B
 
 	Node node = getNode(nd_refs[0]);
 	Eigen::Vector3d previous = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+	new_building->points.push_back(previous);
 
 	for(int i = 1; i < nd_refs.size(); i++) {
 		node = getNode(nd_refs[i]);
 		Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+		new_building->points.push_back(pointXYZ);
 
 		LineFeature::Ptr line(new LineFeature());
 		line->pointA = previous;

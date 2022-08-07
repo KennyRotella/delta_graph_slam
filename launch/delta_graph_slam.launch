@@ -87,9 +87,7 @@
     <param name="keyframe_delta_trans" value="2.0" />
     <param name="keyframe_delta_angle" value="2.0" />
     <!-- fix first node for optimization stability -->
-    <param name="fix_first_node" value="false"/>
-    <param name="fix_first_node_stddev" value="10 10 1"/>
-    <param name="fix_first_node_adaptive" value="false"/>
+    <param name="fix_first_node" value="true"/>
     <!-- loop closure params -->
     <param name="distance_thresh" value="15.0" />
     <param name="accum_distance_thresh" value="25.0" />
@@ -145,7 +143,7 @@
     <param name="delta_max_stddev_q" value="0.2" />
     <param name="delta_avg_fitness_score" value="1.25" />
 
-    <param name="delta_importance_ratio" value="100.0" />
+    <param name="delta_importance_ratio" value="300" />
     <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
 
     <!-- delta line based scanmatching -->
