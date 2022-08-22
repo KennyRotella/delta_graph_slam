@@ -28,12 +28,12 @@
 #include <hdl_graph_slam/ros_time_hash.hpp>
 
 #include <hdl_graph_slam/graph_slam.hpp>
+#include <hdl_graph_slam/check_overlapping.hpp>
 #include <hdl_graph_slam/keyframe.hpp>
 #include <hdl_graph_slam/keyframe_updater.hpp>
 #include <hdl_graph_slam/loop_detector.hpp>
 #include <hdl_graph_slam/information_matrix_calculator.hpp>
 #include <hdl_graph_slam/building_tools.hpp>
-#include <hdl_graph_slam/check_overlapping.hpp>
 #include <hdl_graph_slam/map_cloud_generator.hpp>
 #include <hdl_graph_slam/nmea_sentence_parser.hpp>
 #include <hdl_graph_slam/line_based_scanmatcher.hpp>
@@ -117,6 +117,7 @@ public:
     buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/buildings_cloud", 16);
     target_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/target_buildings_cloud", 16);
     overlapped_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/overlapped_buildings_cloud", 16);
+    aligned_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/aligned_buildings", 16);
     aligned_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/aligned_cloud", 16);
     src_cloud_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/src_cloud_pub", 16);
     markers_pub = mt_nh.advertise<visualization_msgs::MarkerArray>("/delta_graph_slam/markers", 16);
@@ -254,28 +255,27 @@ private:
         *aligned += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
       }
 
-      registration->setInputSource(aligned);
-      registration->setInputTarget(buildings_cloud);
+      // registration->setInputSource(aligned);
+      // registration->setInputTarget(buildings_cloud);
 
-      registration->align(*aligned, transform2Dto3D(map_pose.matrix().cast<float>()));
+      // registration->align(*aligned, transform2Dto3D(map_pose.matrix().cast<float>()));
 
-      // building cloud transformed in velo_link frame
-      pcl::transformPointCloud(*aligned, *aligned, map_pose_inv);
+      // // local transformation
+      // Eigen::Matrix3d gicp_trans = transform3Dto2D(registration->getFinalTransformation() * map_pose_inv).cast<double>();
+      
+      // if(gicp_trans.block<2,1>(0,2).norm() > 2.0){
+      //   gicp_trans = Eigen::Matrix3d::Identity();
+      // }
+
+      // // building cloud transformed in velo_link frame
+      // pcl::transformPointCloud(*aligned, *aligned, map_pose_inv);
 
       // global transformation
       Eigen::Matrix3d odom_trans = transform3Dto2D(result.transformation.cast<float>()).cast<double>();
-
-      // local transformation
-      Eigen::Matrix3d gicp_trans = transform3Dto2D(registration->getFinalTransformation() * map_pose_inv).cast<double>();
-      
-      if(gicp_trans.block<2,1>(0,2).norm() > 2.0){
-        gicp_trans = Eigen::Matrix3d::Identity();
-      }
-
-      estimated_odom = map_pose.matrix() * odom_trans * gicp_trans;
+      estimated_odom = map_pose.matrix() * odom_trans;
 
       if(adjust_initial_orientation){
-        Eigen::Matrix3f trans = (odom2map * odom_trans * gicp_trans).matrix().cast<float>();
+        Eigen::Matrix3f trans = (odom2map * odom_trans).matrix().cast<float>();
 
         // use only rotation to estimate initial orientation
         trans.block<2,1>(0,2) = Eigen::Vector2f(0,0);
@@ -506,29 +506,47 @@ private:
     Eigen::Isometry2d odom2map(trans_odom2map.cast<double>());
     trans_odom2map_mutex.unlock();
 
+    pcl::PointCloud<PointT>::Ptr aligned_buildings_cloud(new pcl::PointCloud<PointT>());
+    aligned_buildings_cloud->header.frame_id = "map";
+    aligned_buildings_cloud->header.stamp = ros::Time::now().nsec/1000.0;
+    Eigen::Matrix4d odom_matrix;
+
+    int keyframe_idx = 0;
     for(auto& keyframe : new_keyframes) {
 
-      if(keyframe->aligned_lines.fitness_score > 4.0){
-        continue;
+      // skip first keyframe
+      keyframe_idx += 1;
+      if(keyframes.empty() && keyframe_idx == 1){
+        break;
       }
+
+      pcl::PointCloud<PointT>::Ptr transformed_cloud(new pcl::PointCloud<PointT>());
 
       Eigen::Isometry2d odom = odom2map * keyframe->odom2D;
       Eigen::Isometry2d estimated_odom = keyframe->estimated_odom;
 
+      // local scanmatching is performed using the lidar pointcloud without any transformation
+      odom_matrix = transform2Dto3D(odom.matrix().cast<float>()).cast<double>();
+      std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->aligned_lines.lines, keyframe->aligned_lines.transformation.inverse());
+
       for(Building::Ptr building : keyframe->near_buildings){
 
-        Eigen::Matrix4d odom_matrix = transform2Dto3D(odom.matrix().cast<float>()).cast<double>();
-        std::vector<LineFeature::Ptr> aligned_lines = line_based_scanmatcher->transform_lines(keyframe->aligned_lines.lines, odom_matrix);
+        std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, odom_matrix.inverse());
+        BestFitAlignment result = line_based_scanmatcher->align(building_lines, not_aligned_lines, true, 1.0);
 
-        BestFitAlignment result = line_based_scanmatcher->align(building->getLines(), aligned_lines, true, 4.0);
-        Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
+        for(LineFeature::Ptr line : result.lines){
+          *transformed_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
+        }
 
-        if(result.fitness_score > 2.5){
+        if(result.fitness_score.avg_distance > 1.0 || result.transformation == Eigen::Matrix4d::Identity()){
           continue;
         }
 
-        Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score);
-        Eigen::Isometry2d relpose = estimated_odom.inverse() * trans * building->pose;
+        Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score.avg_distance);
+
+        Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
+        // semplification of: odom.inverse() * (odom * trans * odom.inverse() * building->pose)
+        Eigen::Isometry2d relpose = trans * odom.inverse() * building->pose;
 
         auto edge = graph_slam->add_se2_edge(keyframe->node, building->node, relpose, information_matrix);
         edge->setLevel(1);
@@ -537,7 +555,15 @@ private:
         updated = true;
       }
 
-      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->aligned_lines.fitness_score);
+      pcl::transformPointCloud(*transformed_cloud, *transformed_cloud, odom_matrix.cast<float>());
+      *aligned_buildings_cloud += *transformed_cloud;
+      aligned_buildings_pub.publish(*aligned_buildings_cloud);
+
+      if(keyframe->aligned_lines.fitness_score.avg_distance > 3.0){
+        continue;
+      }
+
+      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->aligned_lines.fitness_score.avg_distance);
 
       g2o::OptimizableGraph::Edge* edge;
       edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information_matrix.block<2,2>(0,0));
@@ -547,7 +573,6 @@ private:
       edge = graph_slam->add_se2_prior_quat_edge(keyframe->node, Eigen::Rotation2Dd(estimated_odom.linear()), information_matrix.block<1,1>(2,2));
       edge->setLevel(0);
       graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel_size", 1.0));
-
     }
 
     std_msgs::Header read_until;
@@ -667,29 +692,49 @@ private:
     graph_slam->optimize(num_iterations, 1);
 
     std::vector<Building::Ptr> overlapped_buildings = getOverlappedBuildings();
-    std::vector<Building::Ptr> unique_overlapped_buildings;
+    // std::vector<Building::Ptr> unique_overlapped_buildings;
 
-    for(Building::Ptr building : overlapped_buildings){
-      bool contains_building = 
-        std::find(unique_overlapped_buildings.begin(), 
-                  unique_overlapped_buildings.end(), 
-                  building
-        ) != unique_overlapped_buildings.end();
+    // for(Building::Ptr building : overlapped_buildings){
+    //   bool contains_building = 
+    //     std::find(unique_overlapped_buildings.begin(), 
+    //               unique_overlapped_buildings.end(), 
+    //               building
+    //     ) != unique_overlapped_buildings.end();
       
-      if(!contains_building){
-        unique_overlapped_buildings.push_back(building);
-      }
-    }
+    //   if(!contains_building){
+    //     unique_overlapped_buildings.push_back(building);
+    //   }
+    // }
+    // std::cout << "OVERLAPPED BUILDINGS: " << overlapped_buildings.size() << std::endl;
+    // std::cout << "UNIQUE OVERLAPPED BUILDINGS: " << unique_overlapped_buildings.size() << std::endl;
 
-    std::cout << "OVERLAPPED BUILDINGS: " << overlapped_buildings.size() << std::endl;
-    std::cout << "UNIQUE OVERLAPPED BUILDINGS: " << unique_overlapped_buildings.size() << std::endl;
+    // for(Building::Ptr building : unique_overlapped_buildings){
+    //   *overlapped_buildings_cloud += *building->getCloud();
+    // }
 
     pcl::PointCloud<PointT>::Ptr overlapped_buildings_cloud(new pcl::PointCloud<PointT>());
     overlapped_buildings_cloud->header.frame_id = "map";
     overlapped_buildings_cloud->header.stamp = ros::Time::now().nsec/1000.0;
 
-    for(Building::Ptr building : unique_overlapped_buildings){
-      *overlapped_buildings_cloud += *building->getCloud();
+    // paired overlapped buildings contiguously indexed
+    for(int i=0; i<overlapped_buildings.size(); i+=2){
+      Building::Ptr A = overlapped_buildings[i];
+      Building::Ptr B = overlapped_buildings[i+1];
+      BestFitAlignment result = line_based_scanmatcher->align_overlapped_buildings(A,B);
+
+      if(result.transformation != Eigen::Matrix4d::Identity()){
+        Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
+        Eigen::Isometry2d relpose = (trans * A->estimate()).inverse() * B->estimate();
+        auto edge = graph_slam->add_se2_edge(A->node, B->node, relpose, Eigen::Matrix3d::Identity());
+        edge->setLevel(1);
+        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
+      }
+
+      for(LineFeature::Ptr line : result.lines){
+        *overlapped_buildings_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
+      }
+
+      *overlapped_buildings_cloud += *B->getCloud();
     }
 
     overlapped_buildings_pub.publish(*overlapped_buildings_cloud);
@@ -979,6 +1024,7 @@ private:
   ros::Publisher buildings_pub;
   ros::Publisher target_buildings_pub;
   ros::Publisher overlapped_buildings_pub;
+  ros::Publisher aligned_buildings_pub;
   ros::Publisher aligned_pub;
   ros::Publisher src_cloud_pub;
   ros::Publisher markers_pub;

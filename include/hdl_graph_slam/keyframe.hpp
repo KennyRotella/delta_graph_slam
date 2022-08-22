@@ -7,9 +7,9 @@
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 #include <boost/optional.hpp>
+#include <hdl_graph_slam/line_based_scanmatcher.hpp>
 #include <hdl_graph_slam/building.hpp>
 #include <hdl_graph_slam/ros_utils.hpp>
-
 
 namespace g2o {
 class VertexSE2;

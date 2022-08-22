@@ -136,25 +136,25 @@
     <param name="delta_transformation_epsilon" value="0.001" />
     <param name="delta_debug_print" value="false" />
 
-    <param name="delta_var_gain_a" value="10" />
+    <param name="delta_var_gain_a" value="7" />
     <param name="delta_min_stddev_x" value="0.1" />
-    <param name="delta_max_stddev_x" value="5.0" />
+    <param name="delta_max_stddev_x" value="2.0" />
     <param name="delta_min_stddev_q" value="0.05" />
     <param name="delta_max_stddev_q" value="0.2" />
-    <param name="delta_avg_fitness_score" value="1.25" />
+    <param name="delta_avg_fitness_score" value="1.0" />
 
-    <param name="delta_importance_ratio" value="300" />
+    <param name="delta_importance_ratio" value="500" />
     <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
 
     <!-- delta line based scanmatching -->
-    <param name="delta_MinClusterSize" value="30" />
+    <param name="delta_MinClusterSize" value="33" />
     <param name="delta_MaxClusterSize" value="25000" />
     <param name="delta_ClusterTolerance" value="1.3" />
-    <param name="delta_SACDistanceThreshold" value="0.20" />
-    <param name="delta_Max_iterations" value="150" />
-    <!-- merror is in millimeters -->
-    <param name="delta_Merror_threshold" value="0.10" />
-    <param name="delta_lenght_threshold" value="1.0" />
+    <param name="delta_SACDistanceThreshold" value="0.30" />
+    <param name="delta_Max_iterations" value="100" />
+    <!-- merror is in meters -->
+    <param name="delta_Merror_threshold" value="0.15" />
+    <param name="delta_lenght_threshold" value="1.5" />
     <!-- methods: SAC_RANSAC,SAC_LMEDS,SAC_MSAC,SAC_RRANSAC,SAC_RMSAC,SAC_MLESAC,SAC_PROSAC -->
     <param name="delta_SACMethodType" value="SAC_RANSAC" />
 
