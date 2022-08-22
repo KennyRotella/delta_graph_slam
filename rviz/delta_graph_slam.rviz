@@ -78,8 +78,6 @@ Visualization Manager:
             base_link:
               velo_link:
                 {}
-            keyframe:
-              {}
       Update Interval: 0
       Value: true
     - Alpha: 0.20000000298023224
@@ -310,7 +308,7 @@ Visualization Manager:
       Color: 252; 233; 79
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: true
+      Enabled: false
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -322,6 +320,34 @@ Visualization Manager:
       Size (m): 0.10000000149011612
       Style: Flat Squares
       Topic: /delta_graph_slam/overlapped_buildings_cloud
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: false
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 252; 233; 79
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: AlignedBuildings
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.10000000149011612
+      Style: Flat Squares
+      Topic: /delta_graph_slam/aligned_buildings
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
@@ -363,7 +389,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 17.32265281677246
+      Scale: 14.423685073852539
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
       X: 0

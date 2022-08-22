@@ -14,6 +14,7 @@
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/search/kdtree.h>
 #include <pcl/segmentation/extract_clusters.h>
+#include <hdl_graph_slam/building.hpp>
 
 namespace hdl_graph_slam {
 
@@ -44,11 +45,21 @@ struct EdgeFeature {
   Eigen::Vector3d pointB;
 };
 
+struct FitnessScore {
+  double avg_distance;
+  double coverage;
+  double coverage_percentage;
+};
+
 struct BestFitAlignment {
   std::vector<LineFeature::Ptr> lines;
   Eigen::Matrix4d transformation;
-  double fitness_score;
+  FitnessScore fitness_score;
 };
+
+// forward declaration due to recursive dependencies
+class Building;
+bool are_buildings_overlapped(std::vector<LineFeature::Ptr> A, Eigen::Vector3d centerA, boost::shared_ptr<Building> B);
 
 class LineBasedScanmatcher {
   typedef pcl::PointXYZ PointT;
@@ -56,6 +67,7 @@ class LineBasedScanmatcher {
   struct NearestNeighbor {
     LineFeature::Ptr nearest_neighbor;
     double distance;
+    double coverage;
   };
 
   public:
@@ -80,6 +92,7 @@ class LineBasedScanmatcher {
   void setMerror_threshold (float merror_threshold) {this->merror_threshold = merror_threshold;};
   void setLine_lenght_threshold (float line_lenght_threshold) {this->line_lenght_threshold = line_lenght_threshold;};
   
+  BestFitAlignment align_overlapped_buildings(boost::shared_ptr<Building> A, boost::shared_ptr<Building> B);
   BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false, double max_range = std::numeric_limits<double>::max());
   BestFitAlignment align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false, double max_range = std::numeric_limits<double>::max());
   static std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
@@ -94,6 +107,10 @@ class LineBasedScanmatcher {
   float merror_threshold;         // max mean error acceptance threshold
   float line_lenght_threshold;    // min line lenght acceptance threshold
   
+  double weight(double avg_distance, double coverage_percentage, double transform_distance) const {
+    double max_score_distance = 3.5;
+    return 0.45 * coverage_percentage - 35 * std::min(max_score_distance, avg_distance) / max_score_distance - 20 * std::min(max_score_distance, transform_distance) / max_score_distance;
+  }
   pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
   std::vector<EdgeFeature::Ptr> edge_extraction(std::vector<LineFeature::Ptr> lines);
@@ -104,8 +121,9 @@ class LineBasedScanmatcher {
   Eigen::Matrix4d align_lines(LineFeature::Ptr line1, LineFeature::Ptr line2);
   double point_to_line_distance(Eigen::Vector3d point, Eigen::Vector3d line_point, Eigen::Vector3d line_direction);
   double point_to_line_distance(Eigen::Vector3d point, LineFeature::Ptr line);
-  double line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
-  double calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range = std::numeric_limits<double>::max());
+  bool is_point_on_line(Eigen::Vector3d point, LineFeature::Ptr line);
+  FitnessScore line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
+  FitnessScore calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range = std::numeric_limits<double>::max());
   NearestNeighbor nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
 };
 

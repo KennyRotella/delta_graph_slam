@@ -6,6 +6,7 @@
 #include <boost/property_tree/xml_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/thread/thread.hpp>
+#include <hdl_graph_slam/line_based_scanmatcher.hpp>
 #include <hdl_graph_slam/building.hpp>
 #include <hdl_graph_slam/ros_utils.hpp>
 #include <hdl_graph_slam/graph_slam.hpp>
@@ -27,7 +28,6 @@
 #include <curlpp/Options.hpp>
 #include <curlpp/Exception.hpp>
 
-#include <hdl_graph_slam/line_based_scanmatcher.hpp>
 namespace pt = boost::property_tree;
 
 namespace hdl_graph_slam {
