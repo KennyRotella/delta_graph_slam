@@ -7,6 +7,7 @@
 #include <pcl_ros/transforms.h>
 #include <pcl_ros/point_cloud.h>
 #include <tf/transform_listener.h>
+#include <tf_conversions/tf_eigen.h>
 
 #include <sensor_msgs/Imu.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -101,7 +102,6 @@ private:
     distance_far_thresh = private_nh.param<double>("distance_far_thresh", 100.0);
 
     base_link_frame = private_nh.param<std::string>("base_link_frame", "");
-    lidar_height = private_nh.param<float>("lidar_height", 0);
   }
 
   void imu_callback(const sensor_msgs::ImuConstPtr& imu_msg) {
@@ -109,6 +109,8 @@ private:
   }
 
   void cloud_callback(const pcl::PointCloud<PointT>& src_cloud_r) {
+
+    Eigen::Vector3d lidar_position = Eigen::Vector3d::Zero();
 
     pcl::PointCloud<PointT>::ConstPtr src_cloud = src_cloud_r.makeShared();
     if(src_cloud->empty()) {
@@ -137,19 +139,24 @@ private:
       transformed->header.frame_id = base_link_frame;
       transformed->header.stamp = src_cloud->header.stamp;
       src_cloud = transformed;
+
+      Eigen::Isometry3d transform_isometry;
+      tf::transformTFToEigen(transform, transform_isometry);
+      lidar_position = transform_isometry.translation();
     }
 
-    pcl::PointCloud<PointT>::ConstPtr filtered = distance_filter(src_cloud);
-    filtered = downsample(filtered);
-    filtered = outlier_removal(filtered);
+    pcl::PointCloud<PointT>::ConstPtr filtered3D;
+    filtered3D = distance_filter(src_cloud);
+    filtered3D = downsample(filtered3D);
+    filtered3D = outlier_removal(filtered3D);
 
-    points_pub.publish(*filtered);
+    pcl::PointCloud<PointT>::ConstPtr filtered2D;
+    filtered2D = height_filtering(filtered3D, lidar_position);
+    filtered2D = normal_filtering(filtered2D, lidar_position);
+    filtered2D = flatten(filtered2D);
 
-    filtered = height_filtering(filtered);
-    filtered = normal_filtering(filtered);
-    filtered = flatten(filtered);
-
-    flat_points_pub.publish(*filtered);
+    points_pub.publish(*filtered3D);
+    flat_points_pub.publish(*filtered2D);
   }
 
   pcl::PointCloud<PointT>::ConstPtr flatten(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
@@ -175,15 +182,16 @@ private:
       /**
    * @brief filter points below lidar height
    * @param cloud  input cloud
+   * @param lidar_position lidar position
    * @return filtered cloud
    */
-  pcl::PointCloud<PointT>::Ptr height_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+  pcl::PointCloud<PointT>::Ptr height_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud, Eigen::Vector3d lidar_position) const {
     
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
     filtered->reserve(cloud->size());
 
     for(int i = 0; i < cloud->size(); i++) {
-      if(cloud->at(i).z > lidar_height) {
+      if(cloud->at(i).z > lidar_position.z()) {
         filtered->push_back(cloud->at(i));
       }
     }
@@ -199,9 +207,10 @@ private:
     /**
    * @brief filter points with non-vertical normals
    * @param cloud  input cloud
+   * @param lidar_position lidar position
    * @return filtered cloud
    */
-  pcl::PointCloud<PointT>::Ptr normal_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud) const {
+  pcl::PointCloud<PointT>::Ptr normal_filtering(const pcl::PointCloud<PointT>::ConstPtr& cloud, Eigen::Vector3d lidar_position) const {
     pcl::NormalEstimation<PointT, pcl::Normal> ne;
     ne.setInputCloud(cloud);
 
@@ -211,7 +220,7 @@ private:
     pcl::PointCloud<pcl::Normal>::Ptr normals(new pcl::PointCloud<pcl::Normal>);
     ne.setKSearch(10);
 
-    ne.setViewPoint(0.0f, 0.0f, lidar_height);
+    ne.setViewPoint(lidar_position.x(), lidar_position.y(), lidar_position.z());
     ne.compute(*normals);
 
     pcl::PointCloud<PointT>::Ptr filtered(new pcl::PointCloud<PointT>);
@@ -359,7 +368,6 @@ private:
   tf::TransformListener tf_listener;
 
   std::string base_link_frame;
-  float lidar_height;
 
   bool use_distance_filter;
   double distance_near_thresh;

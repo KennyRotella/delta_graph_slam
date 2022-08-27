@@ -15,47 +15,42 @@ BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr 
   result.transformation = Eigen::Matrix4d::Identity();
   result.fitness_score.avg_distance = std::numeric_limits<double>::max();
 
+  double result_score = std::numeric_limits<double>::lowest();
+
   for(LineFeature::Ptr lineSource : linesSource){
-    NearestNeighbor nn_lineTarget = nearest_neighbor(lineSource, linesTarget);
+    for(LineFeature::Ptr lineTarget : linesTarget){
 
-    if(!nn_lineTarget.nearest_neighbor){
-      continue;
-    }
+      Eigen::Vector3d srcLine = (lineSource->pointA - lineSource->pointB).normalized();
+      Eigen::Vector3d trgLine = (lineTarget->pointA - lineTarget->pointB).normalized();
 
-    Eigen::Vector3d srcLine = (lineSource->pointA - lineSource->pointB).normalized();
-    Eigen::Vector3d trgLine = (nn_lineTarget.nearest_neighbor->pointA - nn_lineTarget.nearest_neighbor->pointB).normalized();
+      double cosine = srcLine.dot(trgLine);
+      if(std::abs(cosine) < std::cos(max_angle)){
+        continue;
+      }
 
-    double cosine = srcLine.dot(trgLine);
-    if(std::abs(cosine) < std::cos(max_angle)){
-      continue;
-    }
+      Eigen::Matrix4d transform = align_lines(lineSource, lineTarget);
+      Eigen::Vector3d translation = transform.block<3,1>(0,3);
 
-    Eigen::Matrix4d transform = align_lines(lineSource, nn_lineTarget.nearest_neighbor);
-    
-    // this is needed since the final translation depends also
-    // on the distance from the origin of the points we want to transform
-    Eigen::Matrix4d pointATrans = Eigen::Matrix4d::Identity();
-    pointATrans.block<3,1>(0,3) = lineSource->pointA;
-    Eigen::Vector3d translation = (transform * pointATrans).block<3,1>(0,3);
-    translation -= lineSource->pointA;
+      if(translation.norm() > max_distance){
+        continue;
+      }
 
-    if(translation.norm() > max_distance){
-      continue;
-    }
+      std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
+      FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
+      double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
 
-    double weight = 1 + std::min(max_distance,translation.norm()) / max_distance;
-    std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
-    FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
-    fitness_score.avg_distance *= weight;
+      if(score > result_score){
+        Eigen::Vector3d centerA = Eigen::Vector3d::Zero();
+        centerA.block<2,1>(0,0) = (A->estimate() * transform3Dto2D(transform.cast<float>()).cast<double>()).block<2,1>(0,2);
+        // additional check to make sure buildings are not overlapped
+        // remove overlapping transformations from search space
+        if(!are_buildings_overlapped(linesSourceTransformed, centerA, B)){
+          result.lines = linesSourceTransformed;
+          result.transformation = transform;
+          result.fitness_score = fitness_score;
 
-    if(fitness_score.avg_distance < result.fitness_score.avg_distance){
-      Eigen::Vector3d centerA = Eigen::Vector3d::Zero();
-      centerA.block<2,1>(0,0) = (A->estimate() * transform3Dto2D(transform.cast<float>()).cast<double>()).block<2,1>(0,2);
-      // additional check to make sure buildings are not overlapped
-      if(!are_buildings_overlapped(linesSourceTransformed, centerA, B)){
-        result.lines = linesSourceTransformed;
-        result.transformation = transform;
-        result.fitness_score = fitness_score;
+          result_score = score;
+        }
       }
     }
   }
@@ -83,8 +78,6 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
   std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
   std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
 
-  std::cout << "START" << std::endl;
-
   for(EdgeFeature::Ptr edgeSource : edgesSource){
     for(EdgeFeature::Ptr edgeTarget : edgesTarget){
 
@@ -111,7 +104,6 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
         result.transformation = transform;
         result.fitness_score = fitness_score;
         result_score = score;
-        std::cout << "SCORE EDGE: " << score << std::endl;
       }
     }
   }
@@ -149,11 +141,8 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
       result.transformation = transform;
       result.fitness_score = fitness_score;
       result_score = score;
-      std::cout << "SCORE LINE: " << score << std::endl;
     }
   }
-
-  std::cout << "END" << std::endl;
 
   return result;
 }
@@ -302,7 +291,6 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::P
       };
       lines.push_back(line);
     }
-
   }
 
   return lines;
@@ -586,24 +574,6 @@ FitnessScore LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_s
 
   return score;
 }
-
-// double LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_src, LineFeature::Ptr line_trg){
-
-//   double distance1 = 0;
-//   double distance2 = 0;
-
-//   distance1 += point_to_line_distance(line_src->pointA, line_trg);
-//   distance1 += point_to_line_distance(line_src->pointB, line_trg);
-
-//   distance2 += point_to_line_distance(line_trg->pointA, line_src);
-//   distance2 += point_to_line_distance(line_trg->pointB, line_src);
-
-//   distance1 =  distance1 / 2;
-//   distance2 =  distance2 / 2;
-
-//   // we compute te minimum distance in order to not take into account the lenght of the lines
-//   return std::min(distance1, distance2);
-// }
 
 FitnessScore LineBasedScanmatcher::calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range){
 

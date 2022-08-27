@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<launch>
+
+  <arg name="bag_path" default="/home/delta1995/tesi/delta" />
+  <arg name="bag_filename" default="kitti_2011_09_30_drive_0027_synced.bag" />
+
+  <node pkg="rosbag" type="play" name="player" args="--clock -r 0.2 $(arg bag_path)/$(arg bag_filename)" output="screen" >
+    <remap from="tf" to="tf_old" />
+  </node>
+
+  <node name="remapper" pkg="tf_remapper_cpp" type="tf_remap">
+    <rosparam param="mappings">[{old: world, new: map},{old: base_link, new: gt_base_link}]</rosparam>
+  </node>
+
+</launch>

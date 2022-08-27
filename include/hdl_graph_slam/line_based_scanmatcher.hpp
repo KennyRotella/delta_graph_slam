@@ -109,7 +109,7 @@ class LineBasedScanmatcher {
   
   double weight(double avg_distance, double coverage_percentage, double transform_distance) const {
     double max_score_distance = 3.5;
-    return 0.45 * coverage_percentage - 35 * std::min(max_score_distance, avg_distance) / max_score_distance - 20 * std::min(max_score_distance, transform_distance) / max_score_distance;
+    return coverage_percentage - 60 * std::min(max_score_distance, avg_distance) / max_score_distance - 20 * std::min(max_score_distance, transform_distance) / max_score_distance;
   }
   pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
