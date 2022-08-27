@@ -77,7 +77,7 @@ Eigen::Isometry3d odom2isometry(const nav_msgs::OdometryConstPtr& odom_msg) {
   quat.w() = orientation.w;
   quat.x() = orientation.x;
   quat.y() = orientation.y;
-  quat.z() = orientation.z; //
+  quat.z() = orientation.z;
 
   Eigen::Isometry3d isometry = Eigen::Isometry3d::Identity();
   isometry.linear() = quat.toRotationMatrix();

@@ -50,7 +50,7 @@ bool are_lines_intersected(LineFeature::Ptr line1, LineFeature::Ptr line2)
 
 std::vector<LineFeature::Ptr> shrink_polygon(std::vector<LineFeature::Ptr> lines, Eigen::Vector3d center){
   std::vector<LineFeature::Ptr> shrinked_lines;
-  double shrink_ratio = 0.99;
+  double shrink_ratio = 0.95;
 
   for(LineFeature::Ptr line: lines){
     Eigen::Vector3d pointA = line->pointA;

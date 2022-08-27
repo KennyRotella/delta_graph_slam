@@ -4,7 +4,6 @@ Panels:
     Name: Displays
     Property Tree Widget:
       Expanded:
-        - /TF1/Frames1
         - /MarkerArray1/Namespaces1
       Splitter Ratio: 0.5
     Tree Height: 667
@@ -35,7 +34,7 @@ Visualization Manager:
   Class: ""
   Displays:
     - Alpha: 0.10000000149011612
-      Cell Size: 10
+      Cell Size: 1
       Class: rviz/Grid
       Color: 160; 160; 164
       Enabled: true
@@ -49,7 +48,7 @@ Visualization Manager:
         Y: 0
         Z: 0
       Plane: XY
-      Plane Cell Count: 50
+      Plane Cell Count: 500
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz/TF
@@ -59,6 +58,18 @@ Visualization Manager:
         All Enabled: false
         base_link:
           Value: true
+        camera_color_left:
+          Value: false
+        camera_color_right:
+          Value: false
+        camera_gray_left:
+          Value: false
+        camera_gray_right:
+          Value: false
+        gt_base_link:
+          Value: true
+        imu_link:
+          Value: true
         keyframe:
           Value: true
         map:
@@ -66,7 +77,7 @@ Visualization Manager:
         odom:
           Value: true
         velo_link:
-          Value: false
+          Value: true
       Marker Scale: 1
       Name: TF
       Show Arrows: true
@@ -74,10 +85,23 @@ Visualization Manager:
       Show Names: true
       Tree:
         map:
+          gt_base_link:
+            {}
           odom:
             base_link:
-              velo_link:
-                {}
+              imu_link:
+                camera_color_left:
+                  {}
+                camera_color_right:
+                  {}
+                camera_gray_left:
+                  {}
+                camera_gray_right:
+                  {}
+                velo_link:
+                  {}
+            keyframe:
+              {}
       Update Interval: 0
       Value: true
     - Alpha: 0.20000000298023224
@@ -389,7 +413,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 14.423685073852539
+      Scale: 22.106815338134766
       Target Frame: base_link
       Value: TopDownOrtho (rviz)
       X: 0

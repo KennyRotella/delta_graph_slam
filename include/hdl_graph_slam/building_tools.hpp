@@ -49,7 +49,7 @@ class BuildingTools {
 public:
 	typedef boost::shared_ptr<BuildingTools> Ptr;
 	BuildingTools() {}
-	BuildingTools(std::string host, Eigen::Vector2d zero_utm, GraphSLAM* graph_slam, double radius=35, double buffer_radius=100):
+	BuildingTools(std::string host, Eigen::Vector2d zero_utm, GraphSLAM* graph_slam, double radius=35, double buffer_radius=120):
 		host(host),
 		zero_utm(zero_utm),
 		radius(radius),
