@@ -10,7 +10,9 @@
 #include <message_filters/subscriber.h>
 #include <message_filters/time_synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
-#include <tf2_ros/transform_listener.h>
+#include <tf/transform_listener.h>
+#include <tf_conversions/tf_eigen.h>
+#include <tf_conversions/tf_eigen.h>
 
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/PointCloud2.h>
@@ -57,9 +59,6 @@ public:
     nh = getNodeHandle();
     mt_nh = getMTNodeHandle();
     private_nh = getPrivateNodeHandle();
-
-    tf_buffer.reset(new tf2_ros::Buffer());
-    tf_listener.reset(new tf2_ros::TransformListener(*tf_buffer));
 
     // init parameters
     map_frame_id = private_nh.param<std::string>("map_frame_id", "map");
@@ -255,21 +254,6 @@ private:
         *aligned += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
       }
 
-      // registration->setInputSource(aligned);
-      // registration->setInputTarget(buildings_cloud);
-
-      // registration->align(*aligned, transform2Dto3D(map_pose.matrix().cast<float>()));
-
-      // // local transformation
-      // Eigen::Matrix3d gicp_trans = transform3Dto2D(registration->getFinalTransformation() * map_pose_inv).cast<double>();
-      
-      // if(gicp_trans.block<2,1>(0,2).norm() > 2.0){
-      //   gicp_trans = Eigen::Matrix3d::Identity();
-      // }
-
-      // // building cloud transformed in velo_link frame
-      // pcl::transformPointCloud(*aligned, *aligned, map_pose_inv);
-
       // global transformation
       Eigen::Matrix3d odom_trans = transform3Dto2D(result.transformation.cast<float>()).cast<double>();
       estimated_odom = map_pose.matrix() * odom_trans;
@@ -315,7 +299,30 @@ private:
       double accum_d = keyframe_updater->get_accum_distance();
       adjust_initial_orientation = accum_d == 0;
 
-      KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, estimated_odom, accum_d, cloud, flat_cloud, result, buildings));
+      std::string base_link_frame = "gt_base_link";
+      std::string map_frame = "map";
+
+      Eigen::Isometry2d gt_pose = Eigen::Isometry2d::Identity();
+
+      tf::StampedTransform transform;
+      try {
+        tf_listener.waitForTransform(map_frame, base_link_frame, stamp, ros::Duration(1.0));
+
+        if(!tf_listener.canTransform(map_frame, base_link_frame, stamp)) {
+          std::cerr << "failed to find transform between " << base_link_frame << " and " << map_frame << std::endl;
+        } else {
+          tf_listener.lookupTransform(map_frame, base_link_frame, stamp, transform);
+
+          Eigen::Isometry3d gt_pose3D;
+          tf::transformTFToEigen(transform, gt_pose3D);
+          gt_pose = Eigen::Isometry2d(transform3Dto2D(gt_pose3D.matrix().cast<float>()).cast<double>());
+        }
+
+      } catch(tf2::LookupException e){
+        std::cerr << e.what() << std::endl;
+      }
+
+      KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, estimated_odom, accum_d, cloud, flat_cloud, result, buildings, gt_pose));
 
       std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
       keyframe_queue.push_back(keyframe);
@@ -361,6 +368,32 @@ private:
 
     // the first gps data position will be the origin of the map
     if(!zero_utm) {
+      gps_to_baselink_trans = Eigen::Vector3d::Zero();
+
+      std::string base_link_frame = "base_link";
+      std::string gps_frame = gps_msg->header.frame_id;
+
+      if(!tf_listener.canTransform(base_link_frame, gps_frame, ros::Time(0))) {
+        std::cerr << "failed to find transform between " << base_link_frame << " and " << gps_frame << std::endl;
+      }
+
+      tf::StampedTransform transform;
+      tf_listener.waitForTransform(base_link_frame, gps_frame, ros::Time(0), ros::Duration(5.0));
+      try {
+        tf_listener.lookupTransform(base_link_frame, gps_frame, ros::Time(0), transform);
+
+        Eigen::Isometry3d transform_isometry;
+        tf::transformTFToEigen(transform, transform_isometry);
+        gps_to_baselink_trans = transform_isometry.translation();
+      } catch(tf2::LookupException e){
+        std::cerr << e.what() << std::endl;
+      }
+      
+      std::cout << "transform between " << gps_frame << " and " << base_link_frame << std::endl << gps_to_baselink_trans << std::endl;
+
+      xy.x() -= gps_to_baselink_trans.x();
+      xy.y() -= gps_to_baselink_trans.y();
+
       zero_utm = xy;
       // zone and band are used later to convert utm coords to lla 
       // (needed later to download buildings)
@@ -418,6 +451,8 @@ private:
       geodesy::fromMsg((*closest_gps)->position, utm);
       Eigen::Vector2d xy(utm.easting, utm.northing);
       xy -= (*zero_utm);
+      xy.x() -= gps_to_baselink_trans.x();
+      xy.y() -= gps_to_baselink_trans.y();
 
       keyframe->utm_coord = xy;
 
@@ -692,31 +727,12 @@ private:
     graph_slam->optimize(num_iterations, 1);
 
     std::vector<Building::Ptr> overlapped_buildings = getOverlappedBuildings();
-    // std::vector<Building::Ptr> unique_overlapped_buildings;
-
-    // for(Building::Ptr building : overlapped_buildings){
-    //   bool contains_building = 
-    //     std::find(unique_overlapped_buildings.begin(), 
-    //               unique_overlapped_buildings.end(), 
-    //               building
-    //     ) != unique_overlapped_buildings.end();
-      
-    //   if(!contains_building){
-    //     unique_overlapped_buildings.push_back(building);
-    //   }
-    // }
-    // std::cout << "OVERLAPPED BUILDINGS: " << overlapped_buildings.size() << std::endl;
-    // std::cout << "UNIQUE OVERLAPPED BUILDINGS: " << unique_overlapped_buildings.size() << std::endl;
-
-    // for(Building::Ptr building : unique_overlapped_buildings){
-    //   *overlapped_buildings_cloud += *building->getCloud();
-    // }
 
     pcl::PointCloud<PointT>::Ptr overlapped_buildings_cloud(new pcl::PointCloud<PointT>());
     overlapped_buildings_cloud->header.frame_id = "map";
     overlapped_buildings_cloud->header.stamp = ros::Time::now().nsec/1000.0;
 
-    // paired overlapped buildings contiguously indexed
+    // paired overlapped buildings are contiguously indexed
     for(int i=0; i<overlapped_buildings.size(); i+=2){
       Building::Ptr A = overlapped_buildings[i];
       Building::Ptr B = overlapped_buildings[i+1];
@@ -725,7 +741,9 @@ private:
       if(result.transformation != Eigen::Matrix4d::Identity()){
         Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
         Eigen::Isometry2d relpose = (trans * A->estimate()).inverse() * B->estimate();
-        auto edge = graph_slam->add_se2_edge(A->node, B->node, relpose, Eigen::Matrix3d::Identity());
+
+        Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score.avg_distance);
+        auto edge = graph_slam->add_se2_edge(A->node, B->node, relpose, information_matrix);
         edge->setLevel(1);
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
       }
@@ -910,7 +928,7 @@ private:
     sphere_marker.color.r = 1.0;
     sphere_marker.color.a = 0.1;
 
-    // gps markers
+    // gt markers
     visualization_msgs::Marker& gps_marker = markers.markers[4];
     gps_marker.header.frame_id = "map";
     gps_marker.header.stamp = stamp;
@@ -931,7 +949,7 @@ private:
         continue;
 
       Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
-      Eigen::Vector2d pt2 = *keyframe->utm_coord;
+      Eigen::Vector2d pt2 = keyframe->gt_pose.translation();
 
       gps_marker.points[i * 2].x = pt1.x();
       gps_marker.points[i * 2].y = pt1.y();
@@ -1008,8 +1026,7 @@ private:
   ros::NodeHandle private_nh;
   ros::WallTimer optimization_timer;
 
-  boost::shared_ptr<tf2_ros::Buffer> tf_buffer;
-  boost::shared_ptr<tf2_ros::TransformListener> tf_listener;
+  tf::TransformListener tf_listener;
   bool adjust_initial_orientation;
 
   std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> odom_sub;
@@ -1053,6 +1070,7 @@ private:
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
 
+  Eigen::Vector3d gps_to_baselink_trans;
   boost::optional<Eigen::Vector2d> zero_utm;
   int zero_utm_zone;
   char zero_utm_band;

@@ -3,7 +3,7 @@
 namespace hdl_graph_slam {
 
 std::vector<Building::Ptr> BuildingTools::getBuildings(double lat, double lon) {
-	
+
 	if(!async_handle.joinable() || async_handle.try_join_for(boost::chrono::milliseconds(1))){
 		async_handle = boost::thread(boost::bind(&BuildingTools::downloadBuildings, this, lat, lon));
 	}
@@ -16,7 +16,7 @@ std::vector<Building::Ptr> BuildingTools::getBuildings(double lat, double lon) {
 
 	std::vector<Building::Ptr> buildings_in_range;
 	buildings_in_range = parseBuildings(lat, lon);
-
+	
 	return buildings_in_range;
 }
 
@@ -33,7 +33,7 @@ std::vector<Building::Ptr> BuildingTools::getBuildingNodes() {
 void BuildingTools::downloadBuildings(double lat, double lon) {
 
 	Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(lat, lon, 0));
-	if(!xml_tree.empty() && (pointXYZ - buffer_center).norm() < (2.0/3.0 * buffer_radius)){
+	if(!xml_tree.empty() && (pointXYZ - buffer_center).norm() < (buffer_radius / 2.0)){
 		return;
 	}
 

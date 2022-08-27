@@ -36,7 +36,8 @@ public:
     const pcl::PointCloud<PointT>::ConstPtr& cloud,
     const pcl::PointCloud<PointT>::ConstPtr& flat_cloud,
     BestFitAlignment aligned_lines,
-    std::vector<Building::Ptr> near_buildings);
+    std::vector<Building::Ptr> near_buildings,
+    const Eigen::Isometry2d& gt_pose);
   virtual ~KeyFrame();
 
   long id() const;
@@ -53,6 +54,7 @@ public:
   BestFitAlignment aligned_lines;                         // 2D flattened point cloud lines
   std::vector<Building::Ptr> near_buildings;              // buildings found in proximity
   boost::optional<Eigen::Vector2d> utm_coord;             // UTM coord obtained by GPS
+  Eigen::Isometry2d gt_pose;                              // ground truth pose
 
   g2o::VertexSE2* node;  // node instance
 };

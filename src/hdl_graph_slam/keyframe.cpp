@@ -17,7 +17,8 @@ KeyFrame::KeyFrame(const ros::Time& stamp,
   const pcl::PointCloud<PointT>::ConstPtr& cloud,
   const pcl::PointCloud<PointT>::ConstPtr& flat_cloud,
   BestFitAlignment aligned_lines,
-  std::vector<Building::Ptr> near_buildings) : stamp(stamp), odom(odom), odom2D(odom2D), estimated_odom(estimated_odom), accum_distance(accum_distance), cloud(cloud), flat_cloud(flat_cloud), aligned_lines(aligned_lines), near_buildings(near_buildings), node(nullptr) {}
+  std::vector<Building::Ptr> near_buildings,
+  const Eigen::Isometry2d& gt_pose) : stamp(stamp), odom(odom), odom2D(odom2D), estimated_odom(estimated_odom), accum_distance(accum_distance), cloud(cloud), flat_cloud(flat_cloud), aligned_lines(aligned_lines), near_buildings(near_buildings), node(nullptr), gt_pose(gt_pose) {}
 
 KeyFrame::~KeyFrame() {}
 
