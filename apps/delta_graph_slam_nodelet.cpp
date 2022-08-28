@@ -306,10 +306,10 @@ private:
 
       tf::StampedTransform transform;
       try {
-        tf_listener.waitForTransform(map_frame, base_link_frame, stamp, ros::Duration(1.0));
 
+        tf_listener.waitForTransform(map_frame, base_link_frame, stamp, ros::Duration(1.0));
         if(!tf_listener.canTransform(map_frame, base_link_frame, stamp)) {
-          std::cerr << "failed to find transform between " << base_link_frame << " and " << map_frame << std::endl;
+          std::cerr << "failed to find transform between " << base_link_frame << " and " << map_frame << " at stamp " << stamp << std::endl;
         } else {
           tf_listener.lookupTransform(map_frame, base_link_frame, stamp, transform);
 
@@ -789,7 +789,7 @@ private:
    */
   visualization_msgs::MarkerArray create_marker_array(const ros::Time& stamp) const {
     visualization_msgs::MarkerArray markers;
-    markers.markers.resize(5);
+    markers.markers.resize(6);
 
     // node markers
     visualization_msgs::Marker& traj_marker = markers.markers[0];
@@ -928,7 +928,7 @@ private:
     sphere_marker.color.r = 1.0;
     sphere_marker.color.a = 0.1;
 
-    // gt markers
+    // gps markers
     visualization_msgs::Marker& gps_marker = markers.markers[4];
     gps_marker.header.frame_id = "map";
     gps_marker.header.stamp = stamp;
@@ -949,7 +949,7 @@ private:
         continue;
 
       Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
-      Eigen::Vector2d pt2 = keyframe->gt_pose.translation();
+      Eigen::Vector2d pt2 = *keyframe->utm_coord;
 
       gps_marker.points[i * 2].x = pt1.x();
       gps_marker.points[i * 2].y = pt1.y();
@@ -964,6 +964,45 @@ private:
       gps_marker.colors[i * 2 + 1].g = 1.0;
       gps_marker.colors[i * 2 + 1].b = 1.0;
       gps_marker.colors[i * 2 + 1].a = 1.0;
+      
+    }
+
+    // gt markers
+    visualization_msgs::Marker& gt_pose_marker = markers.markers[5];
+    gt_pose_marker.header.frame_id = "map";
+    gt_pose_marker.header.stamp = stamp;
+    gt_pose_marker.ns = "gt_pose";
+    gt_pose_marker.id = 0;
+    gt_pose_marker.type = visualization_msgs::Marker::LINE_LIST;
+
+    gt_pose_marker.pose.orientation.w = 1.0;
+    gt_pose_marker.scale.x = gt_pose_marker.scale.y = gt_pose_marker.scale.z = 0.04;
+
+    gt_pose_marker.points.resize(keyframes.size() * 2);
+    gt_pose_marker.colors.resize(keyframes.size() * 2);
+    for(int i = 0; i < keyframes.size(); i++) {
+
+      auto keyframe = keyframes[i];
+
+      if(!keyframe->utm_coord)
+        continue;
+
+      Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
+      Eigen::Vector2d pt2 = keyframe->gt_pose.translation();
+
+      gt_pose_marker.points[i * 2].x = pt1.x();
+      gt_pose_marker.points[i * 2].y = pt1.y();
+      gt_pose_marker.points[i * 2 + 1].x = pt2.x();
+      gt_pose_marker.points[i * 2 + 1].y = pt2.y();
+
+      gt_pose_marker.colors[i * 2].r = 0.0;
+      gt_pose_marker.colors[i * 2].g = 0.0;
+      gt_pose_marker.colors[i * 2].b = 1.0;
+      gt_pose_marker.colors[i * 2].a = 1.0;
+      gt_pose_marker.colors[i * 2 + 1].r = 0.0;
+      gt_pose_marker.colors[i * 2 + 1].g = 0.0;
+      gt_pose_marker.colors[i * 2 + 1].b = 1.0;
+      gt_pose_marker.colors[i * 2 + 1].a = 1.0;
       
     }
 
@@ -1017,6 +1056,84 @@ private:
 
     int ret = pcl::io::savePCDFileBinary(req.destination+"/map.pcd", *cloud);
     res.success = ret == 0;
+
+    // Compute ATE and RPE errors
+    if(keyframes.size() > 1){
+
+      std::vector<double> ATE;
+      double mean_ATE = 0.0;
+      double sigma_ATE = 0.0;
+
+      std::vector<double> t_RPE;
+      double mean_t_RPE = 0.0;
+      double sigma_t_RPE = 0.0;
+
+      std::vector<double> r_RPE;
+      double mean_r_RPE = 0.0;
+      double sigma_r_RPE = 0.0;
+
+      // i-th computed errors
+      double ATE_i, t_RPE_i, r_RPE_i;
+
+      // compute mean errors
+      // sometimes it fails to find the gt transform
+      if(keyframes[0]->gt_pose.matrix() != Eigen::Matrix3d::Identity()){
+        ATE_i = (keyframes[0]->gt_pose.inverse() * keyframes[0]->estimate()).translation().norm();
+        ATE.push_back(ATE_i);
+        mean_ATE += ATE_i;
+      }
+
+      for(int i=1; i < keyframes.size(); i++){
+
+        auto prev_keyframe = keyframes[i-1];
+        auto keyframe = keyframes[i];
+
+        // sometimes it fails to find the gt transform
+        if(keyframe->gt_pose.matrix() == Eigen::Matrix3d::Identity()){
+          continue;
+        }
+
+        // ATE
+        ATE_i = (keyframe->gt_pose.inverse() * keyframe->estimate()).translation().norm();
+
+        ATE.push_back(ATE_i);
+        mean_ATE += ATE_i;
+
+        // RPE
+        Eigen::Isometry2d transform_rel = prev_keyframe->estimate().inverse() * keyframe->estimate();
+        Eigen::Isometry2d transform_rel_gt = prev_keyframe->gt_pose.inverse() * keyframe->gt_pose;
+
+        Eigen::Isometry2d delta = transform_rel_gt.inverse() * transform_rel;
+        t_RPE_i = delta.translation().norm();
+        r_RPE_i = Eigen::Rotation2Dd(delta.linear()).angle();
+
+        t_RPE.push_back(t_RPE_i);
+        mean_t_RPE += t_RPE_i;
+
+        r_RPE.push_back(r_RPE_i);
+        mean_r_RPE += r_RPE_i;
+      }
+
+      mean_ATE /= ATE.size();
+      mean_t_RPE /= t_RPE.size();
+      mean_r_RPE /= r_RPE.size();
+
+      // compute standard deviations
+      sigma_ATE += pow(ATE[0] - mean_ATE, 2);
+      for(int i=0; i<t_RPE.size(); i++){
+        sigma_ATE += pow(ATE[i+1] - mean_ATE, 2);
+        sigma_t_RPE += pow(t_RPE[i] - mean_t_RPE, 2);
+        sigma_r_RPE += pow(r_RPE[i] - mean_r_RPE, 2);
+      }
+
+      sigma_ATE = sqrt(sigma_ATE / ATE.size());
+      sigma_t_RPE = sqrt(sigma_t_RPE / t_RPE.size());
+      sigma_r_RPE = sqrt(sigma_r_RPE / r_RPE.size());
+
+      std::cout << "ATE: " << mean_ATE << " +/- " << sigma_ATE << std::endl;
+      std::cout << "t_RPE: " << mean_t_RPE << " +/- " << sigma_t_RPE << std::endl;
+      std::cout << "r_RPE: " << mean_r_RPE << " +/- " << sigma_r_RPE << std::endl;
+    }
 
     return true;
   }
