@@ -2,6 +2,23 @@
 
 namespace hdl_graph_slam {
 
+void LineBasedScanmatcher::print_parameters(){
+  std::cout << "LINE BASED SCANMATCHER PARAMS" << std::endl;
+  std::cout << "min_cluster_size: " << min_cluster_size << std::endl;
+  std::cout << "max_cluster_size: " << max_cluster_size << std::endl;
+  std::cout << "cluster_tolerance: " << cluster_tolerance << std::endl;
+  std::cout << "sac_method_type: " << sac_method_type << std::endl;
+  std::cout << "sac_distance_threshold: " << sac_distance_threshold << std::endl;
+  std::cout << "max_iterations: " << max_iterations << std::endl;
+  std::cout << "merror_threshold: " << merror_threshold << std::endl;
+  std::cout << "line_lenght_threshold: " << line_lenght_threshold << std::endl;
+  std::cout << "avg_distance_weight: " << avg_distance_weight << std::endl;
+  std::cout << "coverage_weight: " << coverage_weight << std::endl;
+  std::cout << "transform_weight: " << transform_weight << std::endl;
+  std::cout << "max_score_distance: " << max_score_distance << std::endl;
+  std::cout << "max_score_translation: " << max_score_translation << std::endl;
+}
+
 BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr A, Building::Ptr B){
   double max_distance = 3.5;
   double max_angle = M_PI / 6.0;
@@ -11,7 +28,8 @@ BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr 
   std::vector<LineFeature::Ptr> linesTarget = B->getLines();
 
   BestFitAlignment result;
-  result.lines = linesSource;
+  result.not_aligned_lines = linesSource;
+  result.aligned_lines = linesSource;
   result.transformation = Eigen::Matrix4d::Identity();
   result.fitness_score.avg_distance = std::numeric_limits<double>::max();
 
@@ -45,7 +63,7 @@ BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr 
         // additional check to make sure buildings are not overlapped
         // remove overlapping transformations from search space
         if(!are_buildings_overlapped(linesSourceTransformed, centerA, B)){
-          result.lines = linesSourceTransformed;
+          result.aligned_lines = linesSourceTransformed;
           result.transformation = transform;
           result.fitness_score = fitness_score;
 
@@ -70,13 +88,18 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
   double min_cosine = 0.9;
 
   BestFitAlignment result;
-  result.lines = linesSource;
+  result.not_aligned_lines = linesSource;
+  result.aligned_lines = linesSource;
   result.transformation = Eigen::Matrix4d::Identity();
   result.fitness_score = calc_fitness_score(linesSource, linesTarget, max_range);
   double result_score = weight(result.fitness_score.avg_distance, result.fitness_score.coverage_percentage, 0.0);
 
   std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
   std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
+
+  std::cout << "START " << (local_alignment ? "LOCAL" : "GLOBAL") << std::endl;
+
+  std::cout << "RESULT SCORE: " << result_score << std::endl;
 
   for(EdgeFeature::Ptr edgeSource : edgesSource){
     for(EdgeFeature::Ptr edgeTarget : edgesTarget){
@@ -100,10 +123,15 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
       double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
 
       if(score > result_score){
-        result.lines = linesSourceTransformed;
+        result.aligned_lines = linesSourceTransformed;
         result.transformation = transform;
         result.fitness_score = fitness_score;
         result_score = score;
+
+        std::cout << "EDGE SCORE: " << result_score << std::endl;
+        std::cout << "avg_distance: " << fitness_score.avg_distance << std::endl;
+        std::cout << "coverage_percentage: " << fitness_score.coverage_percentage << std::endl;
+        std::cout << "translation: " << translation.norm() << std::endl;
       }
     }
   }
@@ -137,12 +165,19 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
     double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
 
     if(score > result_score){
-      result.lines = linesSourceTransformed;
+      result.aligned_lines = linesSourceTransformed;
       result.transformation = transform;
       result.fitness_score = fitness_score;
       result_score = score;
+
+      std::cout << "LINE SCORE: " << result_score << std::endl;
+      std::cout << "avg_distance: " << fitness_score.avg_distance << std::endl;
+      std::cout << "coverage_percentage: " << fitness_score.coverage_percentage << std::endl;
+      std::cout << "translation: " << translation.norm() << std::endl;
     }
   }
+
+  std::cout << "END" << std::endl;
 
   return result;
 }
@@ -156,21 +191,22 @@ pcl::PointIndices::Ptr LineBasedScanmatcher::extract_cluster(pcl::PointCloud<Poi
   }
 
   // Creating the KdTree object for the search method of the extraction
-  pcl::search::KdTree<PointT>::Ptr tree (new pcl::search::KdTree<PointT>);
+  pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
   tree->setInputCloud (cloud_plane);
 
   std::vector<pcl::PointIndices> clusters;
   pcl::EuclideanClusterExtraction<PointT> ec;
-  ec.setClusterTolerance (cluster_tolerance);
-  ec.setMinClusterSize (min_cluster_size);
-  ec.setMaxClusterSize (max_cluster_size);
-  ec.setSearchMethod (tree);
-  ec.setInputCloud (cloud_plane);
-  ec.extract (clusters);
+  ec.setClusterTolerance(cluster_tolerance);
+  ec.setMinClusterSize(1);
+  ec.setMaxClusterSize(max_cluster_size);
+  ec.setSearchMethod(tree);
+  ec.setInputCloud(cloud_plane);
+  ec.extract(clusters);
 
   if(clusters.size() > 0){
     pcl::PointIndices::Ptr cluster_inliers(new pcl::PointIndices);
     cluster_inliers->header = inliers->header;
+    // clusters are ordered by their sizes, the first one is the biggest
     for(int i=0; i<clusters[0].indices.size(); i++){
       int cloud_idx = clusters[0].indices[i];
       cluster_inliers->indices.push_back(inliers->indices[cloud_idx]);
@@ -201,7 +237,7 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::P
 
   std::vector<LineFeature::Ptr> lines;
 
-  while(filtered->points.size() >= 2){
+  while(filtered->points.size() >= min_cluster_size){
 
     // Fit a line
     seg.setInputCloud(filtered);
@@ -216,8 +252,18 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::P
     inliers = extract_cluster(filtered, inliers);
 
     // Check result
-    if (!inliers || inliers->indices.size() == 0)
-      break;
+    if(!inliers || inliers->indices.size() < min_cluster_size){
+
+      // Remove inliers
+      extract.setInputCloud(filtered);
+      extract.setIndices(inliers);
+      extract.setNegative(true);
+      pcl::PointCloud<PointT> cloudF;
+      extract.filter(cloudF);
+      filtered->swap(cloudF);
+
+      continue;
+    }
 
     // Iterate inliers
     double mean_error(0);
@@ -271,7 +317,7 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::line_extraction(const pcl::P
     }
     sigma = sqrt(sigma/inliers->indices.size());
 
-    // Extract inliers
+    // Remove inliers
     extract.setInputCloud(filtered);
     extract.setIndices(inliers);
     extract.setNegative(true);

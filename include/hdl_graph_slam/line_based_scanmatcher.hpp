@@ -52,7 +52,8 @@ struct FitnessScore {
 };
 
 struct BestFitAlignment {
-  std::vector<LineFeature::Ptr> lines;
+  std::vector<LineFeature::Ptr> not_aligned_lines;
+  std::vector<LineFeature::Ptr> aligned_lines;
   Eigen::Matrix4d transformation;
   FitnessScore fitness_score;
 };
@@ -73,6 +74,7 @@ class LineBasedScanmatcher {
   public:
   // Base constructor using default values
   LineBasedScanmatcher():
+    // line fitting params
     min_cluster_size(25),
     max_cluster_size(25000),
     cluster_tolerance(1.0),
@@ -80,7 +82,13 @@ class LineBasedScanmatcher {
     sac_distance_threshold(0.100f),
     max_iterations(500),
     merror_threshold(150.0),
-    line_lenght_threshold(1.0) {}
+    line_lenght_threshold(1.0),
+    // fitness score params
+    avg_distance_weight(0.6),
+    coverage_weight(1.0),
+    transform_weight(0.2),
+    max_score_distance(5.0),
+    max_score_translation(5.0) {}
 
   // Setter to customize algorithm parameter values
   void setMinClusterSize (int min_cluster_size) {this->min_cluster_size = min_cluster_size;};
@@ -91,6 +99,12 @@ class LineBasedScanmatcher {
   void setMax_iterations (float max_iterations) {this->max_iterations = max_iterations;};
   void setMerror_threshold (float merror_threshold) {this->merror_threshold = merror_threshold;};
   void setLine_lenght_threshold (float line_lenght_threshold) {this->line_lenght_threshold = line_lenght_threshold;};
+  void setAvg_distance_weight (double avg_distance_weight) {this->avg_distance_weight = avg_distance_weight;};
+  void setCoverage_weight (double coverage_weight) {this->coverage_weight = coverage_weight;};
+  void setTransform_weight (double transform_weight) {this->transform_weight = transform_weight;};
+  void setMax_score_distance (double max_score_distance) {this->max_score_distance = max_score_distance;};
+  void setMax_score_translation (double max_score_translation) {this->max_score_translation = max_score_translation;};
+  void print_parameters();
   
   BestFitAlignment align_overlapped_buildings(boost::shared_ptr<Building> A, boost::shared_ptr<Building> B);
   BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false, double max_range = std::numeric_limits<double>::max());
@@ -106,10 +120,18 @@ class LineBasedScanmatcher {
   int max_iterations;             // max ransac number of iterations
   float merror_threshold;         // max mean error acceptance threshold
   float line_lenght_threshold;    // min line lenght acceptance threshold
+
+  double avg_distance_weight;     // fitness score weight
+  double coverage_weight;         // fitness score weight
+  double transform_weight;        // fitness score weight
+  double max_score_distance;      // fitness score max avg distance
+  double max_score_translation;   // fitness score max translation distance
   
-  double weight(double avg_distance, double coverage_percentage, double transform_distance) const {
-    double max_score_distance = 3.5;
-    return coverage_percentage - 60 * std::min(max_score_distance, avg_distance) / max_score_distance - 20 * std::min(max_score_distance, transform_distance) / max_score_distance;
+  double weight(double avg_distance, double coverage_percentage, double translation_distance) const {
+    return 
+      - avg_distance_weight * (std::min(max_score_distance, avg_distance) / max_score_distance) * 100
+      + coverage_weight * coverage_percentage
+      - transform_weight * (std::min(max_score_translation, translation_distance) / max_score_translation) * 100;
   }
   pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
