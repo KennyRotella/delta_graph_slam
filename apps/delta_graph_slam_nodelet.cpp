@@ -94,6 +94,13 @@ public:
       }
     }
 
+    line_based_scanmatcher->setAvg_distance_weight(private_nh.param<double>("delta_avg_distance_weight", 0.6));
+    line_based_scanmatcher->setCoverage_weight(private_nh.param<double>("delta_coverage_weight", 1.0));
+    line_based_scanmatcher->setTransform_weight(private_nh.param<double>("delta_transform_weight", 0.2));
+    line_based_scanmatcher->setMax_score_distance(private_nh.param<double>("delta_max_score_distance", 5.0));
+    line_based_scanmatcher->setMax_score_translation(private_nh.param<double>("delta_max_score_translation", 5.0));
+    line_based_scanmatcher->print_parameters();
+
     gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
     gps_edge_stddev_xy = private_nh.param<double>("gps_edge_stddev_xy", 10000.0);
 
@@ -118,6 +125,7 @@ public:
     overlapped_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/overlapped_buildings_cloud", 16);
     aligned_buildings_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/aligned_buildings", 16);
     aligned_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/aligned_cloud", 16);
+    not_aligned_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/not_aligned_cloud", 16);
     src_cloud_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/src_cloud_pub", 16);
     markers_pub = mt_nh.advertise<visualization_msgs::MarkerArray>("/delta_graph_slam/markers", 16);
     odom2map_pub = mt_nh.advertise<geometry_msgs::TransformStamped>("/delta_graph_slam/odom2pub", 16);
@@ -226,6 +234,9 @@ private:
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
     aligned->header = flat_cloud->header;
 
+    pcl::PointCloud<PointT>::Ptr not_aligned(new pcl::PointCloud<PointT>());
+    not_aligned->header = flat_cloud->header;
+
     BestFitAlignment result;
 
     // skip keyframe if there are no buildings within radius
@@ -250,8 +261,14 @@ private:
       // the assumption is that the lidar is very accurate once the initial orietation has been fixed
       result = line_based_scanmatcher->align(flat_cloud, buildings_lines, add_keyframe);
 
-      for(LineFeature::Ptr line : result.lines){
-        *aligned += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
+      for(int i=0; i < result.not_aligned_lines.size(); i++){
+
+        LineFeature::Ptr not_aligned_line = result.not_aligned_lines[i];
+        *not_aligned += *interpolate(not_aligned_line->pointA.cast<float>(), not_aligned_line->pointB.cast<float>());
+
+        LineFeature::Ptr aligned_line = result.aligned_lines[i];
+        *aligned += *interpolate(aligned_line->pointA.cast<float>(), aligned_line->pointB.cast<float>());
+
       }
 
       // global transformation
@@ -279,13 +296,18 @@ private:
         }
       }
 
-      // better publishing the already transformed clouds
+      // better publishing all clouds in the map frame
       pcl::PointCloud<PointT>::Ptr trans_cloud(new pcl::PointCloud<PointT>);
 
       pcl::transformPointCloud(*flat_cloud, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
       trans_cloud->header = flat_cloud->header;
       trans_cloud->header.frame_id = "map";
       src_cloud_pub.publish(trans_cloud);
+
+      pcl::transformPointCloud(*not_aligned, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
+      trans_cloud->header = not_aligned->header;
+      trans_cloud->header.frame_id = "map";
+      not_aligned_pub.publish(trans_cloud);
 
       pcl::transformPointCloud(*aligned, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
       trans_cloud->header = aligned->header;
@@ -307,7 +329,7 @@ private:
       tf::StampedTransform transform;
       try {
 
-        tf_listener.waitForTransform(map_frame, base_link_frame, stamp, ros::Duration(1.0));
+        // tf_listener.waitForTransform(map_frame, base_link_frame, stamp, ros::Duration(1.0));
         if(!tf_listener.canTransform(map_frame, base_link_frame, stamp)) {
           std::cerr << "failed to find transform between " << base_link_frame << " and " << map_frame << " at stamp " << stamp << std::endl;
         } else {
@@ -532,6 +554,10 @@ private:
 
   bool update_building_nodes() {
 
+    if(!private_nh.param<bool>("delta_enable_buildings", true)){
+      return false;
+    }
+
     if(new_keyframes.empty()) {
       return false;
     }
@@ -560,16 +586,20 @@ private:
       Eigen::Isometry2d odom = odom2map * keyframe->odom2D;
       Eigen::Isometry2d estimated_odom = keyframe->estimated_odom;
 
-      // local scanmatching is performed using the lidar pointcloud without any transformation
       odom_matrix = transform2Dto3D(odom.matrix().cast<float>()).cast<double>();
-      std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->aligned_lines.lines, keyframe->aligned_lines.transformation.inverse());
 
       for(Building::Ptr building : keyframe->near_buildings){
 
-        std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, odom_matrix.inverse());
-        BestFitAlignment result = line_based_scanmatcher->align(building_lines, not_aligned_lines, true, 1.0);
+        // local scanmatching is performed using the lidar pointcloud without global alignment
+        // scanmatching is performed in building frame
+        Eigen::Matrix4d building_pose = transform2Dto3D(building->pose.matrix().cast<float>()).cast<double>();
+        std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, building_pose.inverse());
+        std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, building_pose.inverse() * odom_matrix);
 
-        for(LineFeature::Ptr line : result.lines){
+        BestFitAlignment result = line_based_scanmatcher->align(building_lines, not_aligned_lines, true, 1.5);
+
+        std::vector<LineFeature::Ptr> map_building_lines = line_based_scanmatcher->transform_lines(result.aligned_lines, building_pose);
+        for(LineFeature::Ptr line : map_building_lines){
           *transformed_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
         }
 
@@ -580,8 +610,8 @@ private:
         Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score.avg_distance);
 
         Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
-        // semplification of: odom.inverse() * (odom * trans * odom.inverse() * building->pose)
-        Eigen::Isometry2d relpose = trans * odom.inverse() * building->pose;
+        // relative transformation from keyframe to building pose
+        Eigen::Isometry2d relpose = odom.inverse() * (building->pose * trans);
 
         auto edge = graph_slam->add_se2_edge(keyframe->node, building->node, relpose, information_matrix);
         edge->setLevel(1);
@@ -590,15 +620,14 @@ private:
         updated = true;
       }
 
-      pcl::transformPointCloud(*transformed_cloud, *transformed_cloud, odom_matrix.cast<float>());
       *aligned_buildings_cloud += *transformed_cloud;
       aligned_buildings_pub.publish(*aligned_buildings_cloud);
 
-      if(keyframe->aligned_lines.fitness_score.avg_distance > 3.0){
+      if(keyframe->global_alignment.fitness_score.avg_distance > 3.0){
         continue;
       }
 
-      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->aligned_lines.fitness_score.avg_distance);
+      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->global_alignment.fitness_score.avg_distance);
 
       g2o::OptimizableGraph::Edge* edge;
       edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information_matrix.block<2,2>(0,0));
@@ -693,7 +722,7 @@ private:
 
     if(!keyframe_updated & !flush_gps_queue() & !update_building_nodes()) {
       return;
-    }      
+    }
 
     // loop detection
     std::vector<Loop::Ptr> loops = loop_detector->detect(keyframes, new_keyframes, *graph_slam);
@@ -748,7 +777,7 @@ private:
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
       }
 
-      for(LineFeature::Ptr line : result.lines){
+      for(LineFeature::Ptr line : result.aligned_lines){
         *overlapped_buildings_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
       }
 
@@ -1160,6 +1189,7 @@ private:
   ros::Publisher overlapped_buildings_pub;
   ros::Publisher aligned_buildings_pub;
   ros::Publisher aligned_pub;
+  ros::Publisher not_aligned_pub;
   ros::Publisher src_cloud_pub;
   ros::Publisher markers_pub;
 
