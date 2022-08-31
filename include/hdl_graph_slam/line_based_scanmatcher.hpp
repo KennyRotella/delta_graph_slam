@@ -60,7 +60,7 @@ struct BestFitAlignment {
 
 // forward declaration due to recursive dependencies
 class Building;
-bool are_buildings_overlapped(std::vector<LineFeature::Ptr> A, Eigen::Vector3d centerA, boost::shared_ptr<Building> B);
+bool are_buildings_overlapped(std::vector<LineFeature::Ptr> A, Eigen::Vector3d centerA, std::vector<LineFeature::Ptr> B, Eigen::Vector3d centerB);
 
 class LineBasedScanmatcher {
   typedef pcl::PointXYZ PointT;

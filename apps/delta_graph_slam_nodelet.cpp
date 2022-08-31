@@ -524,10 +524,10 @@ private:
 
       // fix the first node
       if(keyframes.empty() && new_keyframes.size() == 1) {
-        Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(3, 3);
+        Eigen::MatrixXd information_matrix = Eigen::MatrixXd::Identity(3, 3);
 
         anchor_node = graph_slam->add_se2_node(Eigen::Isometry2d::Identity());
-        anchor_edge = graph_slam->add_se2_edge(anchor_node, keyframe->node, Eigen::Isometry2d::Identity(), inf);
+        anchor_edge = graph_slam->add_se2_edge(anchor_node, keyframe->node, Eigen::Isometry2d::Identity(), information_matrix);
         if(private_nh.param<bool>("fix_first_node", true)) {
           anchor_node->setFixed(true);
         }
@@ -542,8 +542,8 @@ private:
 
       Eigen::Isometry3d relative_pose = keyframe->odom.inverse() * prev_keyframe->odom;
       Eigen::Isometry2d relative_pose2D = keyframe->odom2D.inverse() * prev_keyframe->odom2D;
-      Eigen::MatrixXd information = inf_calclator->calc_information_matrix(keyframe->cloud, prev_keyframe->cloud, relative_pose);
-      auto edge = graph_slam->add_se2_edge(keyframe->node, prev_keyframe->node, relative_pose2D, information);
+      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix(keyframe->cloud, prev_keyframe->cloud, relative_pose);
+      auto edge = graph_slam->add_se2_edge(keyframe->node, prev_keyframe->node, relative_pose2D, information_matrix);
       edge->setLevel(0);
       graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("odometry_edge_robust_kernel", "NONE"), private_nh.param<double>("odometry_edge_robust_kernel_size", 1.0));
     }
@@ -761,6 +761,11 @@ private:
     overlapped_buildings_cloud->header.frame_id = "map";
     overlapped_buildings_cloud->header.stamp = ros::Time::now().nsec/1000.0;
 
+    for(auto edge : edges_btw_overlapped_buildings){
+      graph_slam->graph->removeEdge(edge);
+    }
+    edges_btw_overlapped_buildings.clear();
+
     // paired overlapped buildings are contiguously indexed
     for(int i=0; i<overlapped_buildings.size(); i+=2){
       Building::Ptr A = overlapped_buildings[i];
@@ -771,10 +776,13 @@ private:
         Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
         Eigen::Isometry2d relpose = (trans * A->estimate()).inverse() * B->estimate();
 
-        Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score.avg_distance);
+
+        Eigen::MatrixXd information_matrix = Eigen::MatrixXd::Identity(3, 3) * 10000;
         auto edge = graph_slam->add_se2_edge(A->node, B->node, relpose, information_matrix);
-        edge->setLevel(1);
+        edge->setLevel(2);
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
+
+        edges_btw_overlapped_buildings.push_back(edge);
       }
 
       for(LineFeature::Ptr line : result.aligned_lines){
@@ -785,6 +793,13 @@ private:
     }
 
     overlapped_buildings_pub.publish(*overlapped_buildings_cloud);
+
+    std::cout << "sleep bef" << std::endl;
+    ros::WallDuration(2).sleep();
+    std::cout << "sleep aft" << std::endl;
+
+    // update the newly added non-overlapping constraints
+    graph_slam->optimize(num_iterations, 2);
 
     // publish tf
     const auto& keyframe = keyframes.back();
@@ -1222,10 +1237,9 @@ private:
   int zero_utm_zone;
   char zero_utm_band;
 
+  std::vector<g2o::HyperGraph::Edge*> edges_btw_overlapped_buildings;
   BuildingTools::Ptr buildings_manager;
   fast_gicp::FastGICP<PointT, PointT>::Ptr registration;
-  double initial_orientation = 0.f;
-  double weight_estimates = 0;
 
   // for map cloud generation
   std::atomic_bool graph_updated;
