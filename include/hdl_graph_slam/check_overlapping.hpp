@@ -50,7 +50,7 @@ bool are_lines_intersected(LineFeature::Ptr line1, LineFeature::Ptr line2)
 
 std::vector<LineFeature::Ptr> shrink_polygon(std::vector<LineFeature::Ptr> lines, Eigen::Vector3d center){
   std::vector<LineFeature::Ptr> shrinked_lines;
-  double shrink_ratio = 0.95;
+  double shrink_ratio = 0.99;
 
   for(LineFeature::Ptr line: lines){
     Eigen::Vector3d pointA = line->pointA;
@@ -94,16 +94,13 @@ bool are_buildings_overlapped(Building::Ptr A, Building::Ptr B){
   return false;
 }
 
-bool are_buildings_overlapped(std::vector<LineFeature::Ptr> A, Eigen::Vector3d centerA, Building::Ptr B){
-
-  Eigen::Vector3d centerB = Eigen::Vector3d::Zero();
-  centerB.block<2,1>(0,0) = B->estimate().matrix().block<2,1>(0,2);
+bool are_buildings_overlapped(std::vector<LineFeature::Ptr> A, Eigen::Vector3d centerA, std::vector<LineFeature::Ptr> B, Eigen::Vector3d centerB){
 
   std::vector<LineFeature::Ptr> shrinked_linesA;
   shrinked_linesA = shrink_polygon(A, centerA);
 
   std::vector<LineFeature::Ptr> shrinked_linesB;
-  shrinked_linesB = shrink_polygon(B->getLines(), centerB);
+  shrinked_linesB = shrink_polygon(B, centerB);
 
   for(LineFeature::Ptr lineA: shrinked_linesA){
     for(LineFeature::Ptr lineB: shrinked_linesB){
