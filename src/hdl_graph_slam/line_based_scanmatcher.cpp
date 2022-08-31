@@ -20,20 +20,25 @@ void LineBasedScanmatcher::print_parameters(){
 }
 
 BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr A, Building::Ptr B){
-  double max_distance = 3.5;
-  double max_angle = M_PI / 6.0;
-  double max_range = 3.0;
-
   std::vector<LineFeature::Ptr> linesSource = A->getLines();
   std::vector<LineFeature::Ptr> linesTarget = B->getLines();
 
+  // transform lines in source reference frame
+  Eigen::Matrix4d building_pose = transform2Dto3D(A->estimate().matrix().cast<float>()).cast<double>();
+  linesSource = transform_lines(linesSource, building_pose.inverse());
+  linesTarget = transform_lines(linesTarget, building_pose.inverse());
+
+  // new centers in the source reference frame
+  Eigen::Vector3d centerA = Eigen::Vector3d::Zero();
+  Eigen::Vector2d centerB_2D = (A->estimate().inverse() * B->estimate()).translation();
+  Eigen::Vector3d centerB = Eigen::Vector3d(centerB_2D.x(), centerB_2D.y(), 0.0);
+
   BestFitAlignment result;
-  result.not_aligned_lines = linesSource;
   result.aligned_lines = linesSource;
   result.transformation = Eigen::Matrix4d::Identity();
-  result.fitness_score.avg_distance = std::numeric_limits<double>::max();
 
-  double result_score = std::numeric_limits<double>::lowest();
+  double max_angle = M_PI / 3.0;
+  double min_translation = std::numeric_limits<double>::max();
 
   for(LineFeature::Ptr lineSource : linesSource){
     for(LineFeature::Ptr lineTarget : linesTarget){
@@ -41,37 +46,30 @@ BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr 
       Eigen::Vector3d srcLine = (lineSource->pointA - lineSource->pointB).normalized();
       Eigen::Vector3d trgLine = (lineTarget->pointA - lineTarget->pointB).normalized();
 
-      double cosine = srcLine.dot(trgLine);
-      if(std::abs(cosine) < std::cos(max_angle)){
-        continue;
-      }
-
       Eigen::Matrix4d transform = align_lines(lineSource, lineTarget);
       Eigen::Vector3d translation = transform.block<3,1>(0,3);
-
-      if(translation.norm() > max_distance){
-        continue;
-      }
+      double angle = Eigen::Rotation2Dd(transform3Dto2D(transform.cast<float>()).cast<double>().block<2,2>(0,0)).angle();
 
       std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
-      FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
-      double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
 
-      if(score > result_score){
-        Eigen::Vector3d centerA = Eigen::Vector3d::Zero();
-        centerA.block<2,1>(0,0) = (A->estimate() * transform3Dto2D(transform.cast<float>()).cast<double>()).block<2,1>(0,2);
+      // take the minimum translation to make buildings not overlapped
+      if(translation.norm() < min_translation && std::cos(angle) > std::cos(max_angle)){
+
         // additional check to make sure buildings are not overlapped
         // remove overlapping transformations from search space
-        if(!are_buildings_overlapped(linesSourceTransformed, centerA, B)){
+        if(!are_buildings_overlapped(linesSourceTransformed, centerA, linesTarget, centerB)){
           result.aligned_lines = linesSourceTransformed;
           result.transformation = transform;
-          result.fitness_score = fitness_score;
 
-          result_score = score;
+          min_translation = translation.norm();
         }
       }
     }
   }
+
+  // transform back result in map reference frame
+  result.aligned_lines = transform_lines(result.aligned_lines, building_pose);
+  result.transformation = building_pose * result.transformation * building_pose.inverse();
 
   return result;
 }
@@ -96,10 +94,6 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
 
   std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
   std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
-
-  std::cout << "START " << (local_alignment ? "LOCAL" : "GLOBAL") << std::endl;
-
-  std::cout << "RESULT SCORE: " << result_score << std::endl;
 
   for(EdgeFeature::Ptr edgeSource : edgesSource){
     for(EdgeFeature::Ptr edgeTarget : edgesTarget){
@@ -127,16 +121,13 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
         result.transformation = transform;
         result.fitness_score = fitness_score;
         result_score = score;
-
-        std::cout << "EDGE SCORE: " << result_score << std::endl;
-        std::cout << "avg_distance: " << fitness_score.avg_distance << std::endl;
-        std::cout << "coverage_percentage: " << fitness_score.coverage_percentage << std::endl;
-        std::cout << "translation: " << translation.norm() << std::endl;
       }
     }
   }
 
-  for(LineFeature::Ptr lineSource : linesSource){
+  // use best transform found so far
+  Eigen::Matrix4d best_trans = result.transformation;
+  for(LineFeature::Ptr lineSource : result.aligned_lines){
 
     NearestNeighbor nn_lineTarget = nearest_neighbor(lineSource, linesTarget);
 
@@ -159,25 +150,18 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
       continue;
     }
 
-    std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
+    std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(result.aligned_lines, transform);
 
     FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
     double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
 
     if(score > result_score){
       result.aligned_lines = linesSourceTransformed;
-      result.transformation = transform;
+      result.transformation = best_trans * transform;
       result.fitness_score = fitness_score;
       result_score = score;
-
-      std::cout << "LINE SCORE: " << result_score << std::endl;
-      std::cout << "avg_distance: " << fitness_score.avg_distance << std::endl;
-      std::cout << "coverage_percentage: " << fitness_score.coverage_percentage << std::endl;
-      std::cout << "translation: " << translation.norm() << std::endl;
     }
   }
-
-  std::cout << "END" << std::endl;
 
   return result;
 }
