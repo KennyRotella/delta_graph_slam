@@ -2,10 +2,19 @@
 
 namespace hdl_graph_slam {
 
-std::vector<Building::Ptr> BuildingTools::getBuildings(double lat, double lon) {
+BuildingTools::BuildingTools(std::string host, Eigen::Vector3d origin, double scale, GraphSLAM* graph_slam, double radius, double buffer_radius) {
+	this->host = host;
+	this->origin = origin;
+	this->scale = scale;
+	this->radius = radius;
+	this->buffer_radius = buffer_radius;
+	this->graph_slam.reset(graph_slam);
+}
+
+std::vector<Building::Ptr> BuildingTools::getBuildings(geographic_msgs::GeoPoint gps) {
 
 	if(!async_handle.joinable() || async_handle.try_join_for(boost::chrono::milliseconds(1))){
-		async_handle = boost::thread(boost::bind(&BuildingTools::downloadBuildings, this, lat, lon));
+		async_handle = boost::thread(boost::bind(&BuildingTools::downloadBuildings, this, gps));
 	}
 
 	// polling with timeout, in case we can get all buildings in the first call
@@ -15,7 +24,7 @@ std::vector<Building::Ptr> BuildingTools::getBuildings(double lat, double lon) {
 	}
 
 	std::vector<Building::Ptr> buildings_in_range;
-	buildings_in_range = parseBuildings(lat, lon);
+	buildings_in_range = parseBuildings(gps);
 	
 	return buildings_in_range;
 }
@@ -30,9 +39,9 @@ std::vector<Building::Ptr> BuildingTools::getBuildingNodes() {
 	return buildingNodes;
 }
 
-void BuildingTools::downloadBuildings(double lat, double lon) {
+void BuildingTools::downloadBuildings(geographic_msgs::GeoPoint gps) {
 
-	Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(lat, lon, 0));
+	Eigen::Vector3d pointXYZ = toEnu(gps);
 	if(!xml_tree.empty() && (pointXYZ - buffer_center).norm() < (buffer_radius / 2.0)){
 		return;
 	}
@@ -43,8 +52,8 @@ void BuildingTools::downloadBuildings(double lat, double lon) {
 			"%s/api/interpreter?data=way[%27building%27](around:%f,%f,%f);%20(._;%%3E;);out;",
 			host.data(),
 			buffer_radius,
-			lat,
-			lon
+			gps.latitude,
+			gps.longitude
 		);
 
 		curlpp::Easy request;
@@ -91,10 +100,10 @@ void BuildingTools::downloadBuildings(double lat, double lon) {
 	std::lock_guard<std::mutex> lock(xml_tree_mutex);
 	nodes = nodes_tmp;
 	xml_tree = xml_tree_tmp;
-	buffer_center = toEnu(Eigen::Vector3d(lat, lon, 0));
+	buffer_center = toEnu(gps);
 }
 
-std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon) {
+std::vector<Building::Ptr> BuildingTools::parseBuildings(geographic_msgs::GeoPoint gps) {
 	std::lock_guard<std::mutex> lock(xml_tree_mutex);
 	std::vector<Building::Ptr> buildings_in_range;
 
@@ -107,7 +116,7 @@ std::vector<Building::Ptr> BuildingTools::parseBuildings(double lat, double lon)
 		if(tree_node.first == "way") {
 			std::string id = tree_node.second.get<std::string>("<xmlattr>.id");
 
-			if(!isBuildingInRadius(tree_node, lat, lon)){
+			if(!isBuildingInRadius(tree_node, gps)){
 				continue;
 			}
 
@@ -153,12 +162,12 @@ Building::Ptr BuildingTools::buildPointCloud(std::vector<std::string> nd_refs, B
 	}
 
 	Node node = getNode(nd_refs[0]);
-	Eigen::Vector3d previous = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+	Eigen::Vector3d previous = toEnu(node.lat, node.lon);
 	new_building->points.push_back(previous);
 
 	for(int i = 1; i < nd_refs.size(); i++) {
 		node = getNode(nd_refs[i]);
-		Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+		Eigen::Vector3d pointXYZ = toEnu(node.lat, node.lon);
 		new_building->points.push_back(pointXYZ);
 
 		LineFeature::Ptr line(new LineFeature());
@@ -187,32 +196,48 @@ BuildingTools::Node BuildingTools::getNode(std::string nd_ref) {
 }
 
 // toEnu converts to enu coordinates from lla
-Eigen::Vector3d BuildingTools::toEnu(Eigen::Vector3d lla) {
-	geographic_msgs::GeoPoint gps_msg;
-	geodesy::UTMPoint utm;
+Eigen::Vector3d BuildingTools::toEnu(geographic_msgs::GeoPoint gps) {
 
-	gps_msg.latitude = lla(0);
-	gps_msg.longitude = lla(1);
-	gps_msg.altitude = 0;
-	geodesy::fromMsg(gps_msg, utm);
+	Eigen::Vector3d xyz = translation_from_gps_msg(gps, scale);
+	xyz -= origin;
+	xyz.z() = 0.;
 
-	return Eigen::Vector3d(utm.easting-zero_utm(0), utm.northing-zero_utm(1), 0.f);
+	return xyz;
 }
 
-bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, double lat, double lon){
+Eigen::Vector3d BuildingTools::toEnu(double latitude, double longitude) {
+
+	geographic_msgs::GeoPoint gps;
+
+	gps.latitude = latitude;
+	gps.longitude = longitude;
+	gps.altitude = 0.;
+
+	Eigen::Vector3d xyz = translation_from_gps_msg(gps, scale);
+	xyz -= origin;
+	xyz.z() = 0.;
+
+	return xyz;
+}
+
+bool BuildingTools::isBuildingInRadius(pt::ptree::value_type &child_tree_node, geographic_msgs::GeoPoint gps){
 	try {
+
+	Eigen::Vector3d enu_coords = toEnu(gps);
 	BOOST_FOREACH(pt::ptree::value_type &tree_node, child_tree_node.second) {
 		if(tree_node.first == "nd") {
 			std::string nd_ref = tree_node.second.get<std::string>("<xmlattr>.ref");
 			Node node = getNode(nd_ref);
-			Eigen::Vector3d pointXYZ = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
-			Eigen::Vector3d enu_coords = toEnu(Eigen::Vector3d(lat, lon, 0));
 
+			Eigen::Vector3d pointXYZ = toEnu(node.lat, node.lon);
+			
 			if((pointXYZ-enu_coords).norm() < radius){
 				return true;
 			}
 		}
-	}} catch(pt::ptree_error &e) {
+	}
+	
+	} catch(pt::ptree_error &e) {
 		std::cerr<< "No xml! error:" << e.what() << std::endl;
 	}
 	return false;
@@ -230,7 +255,7 @@ Eigen::Isometry2d BuildingTools::getBuildingPose(std::vector<std::string> nd_ref
 
 	for(std::string nd_ref : nd_refs) {
 		Node node = getNode(nd_ref);
-		Eigen::Vector3d enu_coords = toEnu(Eigen::Vector3d(node.lat, node.lon, 0));
+		Eigen::Vector3d enu_coords = toEnu(node.lat, node.lon);
 		
 		x_min = enu_coords.x() < x_min ? enu_coords.x() : x_min;
 		x_max = enu_coords.x() > x_max ? enu_coords.x() : x_max;
