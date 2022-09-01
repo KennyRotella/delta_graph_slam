@@ -224,8 +224,11 @@ private:
 
     // download and parse buildings
     std::vector<Building::Ptr> buildings;
+
+    Eigen::Vector3d xyz(map_pose(0,2), map_pose(1,2), 0.);
+    geographic_msgs::GeoPoint gps = gps_msg_from_translation(xyz + *origin, scale);
      
-    buildings = buildings_manager->getBuildings(lla.latitude, lla.longitude);
+    buildings = buildings_manager->getBuildings(gps);
     Eigen::Isometry2d estimated_odom = map_pose;
 
     pcl::PointCloud<PointT>::Ptr trans_buildings_cloud(new pcl::PointCloud<PointT>);
@@ -440,9 +443,14 @@ private:
       zero_utm_zone = utm.zone;
       zero_utm_band = utm.band;
 
+      scale = std::cos(gps_msg->position.latitude * M_PI / 180.);
+      Eigen::Vector3d xyz = translation_from_gps_msg(gps_msg->position, scale);
+      xyz -= gps_to_baselink_trans;
+      origin.reset(xyz);
+
       // fetch buildings as soon as possible
-      buildings_manager.reset(new BuildingTools("https://overpass-api.de", *zero_utm, graph_slam.get()));
-      buildings_manager->getBuildings(gps_msg->position.latitude, gps_msg->position.longitude);
+      buildings_manager.reset(new BuildingTools("https://overpass-api.de", *origin, scale, graph_slam.get()));
+      buildings_manager->getBuildings(gps_msg->position);
     }
     
     std::lock_guard<std::mutex> lock(gps_queue_mutex);
@@ -494,7 +502,12 @@ private:
       xy.x() -= gps_to_baselink_trans.x();
       xy.y() -= gps_to_baselink_trans.y();
 
-      keyframe->utm_coord = xy;
+      Eigen::Vector3d xyz = translation_from_gps_msg((*closest_gps)->position, scale);
+      xyz -= *origin;
+      xyz -= gps_to_baselink_trans;
+
+      keyframe->utm_coord = Eigen::Vector2d(xyz.x(), xyz.y());
+      // keyframe->utm_coord = xy;
 
       if(private_nh.param<bool>("delta_enable_gps_priors", false)) {
         g2o::OptimizableGraph::Edge* edge;
@@ -1265,6 +1278,8 @@ private:
 
   Eigen::Isometry3d grey_camera_to_baselink_trans;
   Eigen::Vector3d gps_to_baselink_trans;
+  boost::optional<Eigen::Vector3d> origin;
+  double scale;
   boost::optional<Eigen::Vector2d> zero_utm;
   int zero_utm_zone;
   char zero_utm_band;
