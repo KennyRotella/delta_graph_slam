@@ -11,6 +11,7 @@
 #include <geometry_msgs/TransformStamped.h>
 #include <tf/transform_listener.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <geographic_msgs/GeoPointStamped.h>
 
 namespace hdl_graph_slam {
 
@@ -48,6 +49,8 @@ Eigen::Matrix4f transform2Dto3D(Eigen::Matrix3f trans2D);
 Eigen::Matrix3f transform3Dto2D(Eigen::Matrix4f trans3D);
 
 pcl::PointCloud<PointT>::Ptr interpolate(Eigen::Vector3f a, Eigen::Vector3f b);
+
+Eigen::Vector3d translation_from_gps_msg(geographic_msgs::GeoPoint msg, double scale);
 
 }  // namespace hdl_graph_slam
 
