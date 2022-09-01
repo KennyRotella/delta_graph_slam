@@ -46,6 +46,7 @@ struct EdgeFeature {
 };
 
 struct FitnessScore {
+  double real_avg_distance;
   double avg_distance;
   double coverage;
   double coverage_percentage;
@@ -67,6 +68,7 @@ class LineBasedScanmatcher {
 
   struct NearestNeighbor {
     LineFeature::Ptr nearest_neighbor;
+    double real_distance;
     double distance;
     double coverage;
   };
@@ -107,8 +109,8 @@ class LineBasedScanmatcher {
   void print_parameters();
   
   BestFitAlignment align_overlapped_buildings(boost::shared_ptr<Building> A, boost::shared_ptr<Building> B);
-  BestFitAlignment align(pcl::PointCloud<PointT>::Ptr inputSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false, double max_range = std::numeric_limits<double>::max());
-  BestFitAlignment align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment = false, double max_range = std::numeric_limits<double>::max());
+  BestFitAlignment align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool constrain_angle = false, double max_range = std::numeric_limits<double>::max());
+  BestFitAlignment align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double max_range = std::numeric_limits<double>::max());
   static std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
 
   public:
@@ -139,7 +141,7 @@ class LineBasedScanmatcher {
   Eigen::Vector3d lines_intersection(LineFeature::Ptr line1, LineFeature::Ptr line2);
   EdgeFeature::Ptr check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2);
   double angle_between_vectors(Eigen::Vector3d A, Eigen::Vector3d B);
-  Eigen::Matrix4d align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2, double max_angle=2*M_PI);
+  Eigen::Matrix4d align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2);
   Eigen::Matrix4d align_lines(LineFeature::Ptr line1, LineFeature::Ptr line2);
   double point_to_line_distance(Eigen::Vector3d point, Eigen::Vector3d line_point, Eigen::Vector3d line_direction);
   double point_to_line_distance(Eigen::Vector3d point, LineFeature::Ptr line);
@@ -147,6 +149,7 @@ class LineBasedScanmatcher {
   FitnessScore line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
   FitnessScore calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range = std::numeric_limits<double>::max());
   NearestNeighbor nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
+  std::vector<LineFeature::Ptr> merge_lines(std::vector<LineFeature::Ptr> lines);
 };
 
 }  // namespace hdl_graph_slam

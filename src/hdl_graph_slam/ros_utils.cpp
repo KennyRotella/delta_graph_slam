@@ -164,4 +164,19 @@ pcl::PointCloud<PointT>::Ptr interpolate(Eigen::Vector3f a, Eigen::Vector3f b) {
 	return building_pointcloud;
 }
 
+// helper method to compute a translation vector from latitude and longitude.
+Eigen::Vector3d translation_from_gps_msg(geographic_msgs::GeoPoint msg, double scale){
+
+  double x, y, z;
+  double er = 6378137; // earth radius (approx.) in meters
+
+  // use a Mercator projection to get the translation vector
+  x = scale * msg.longitude * M_PI * er / 180.;
+  y = scale * er *
+    std::log(std::tan((90. + msg.latitude) * M_PI / 360.));
+  z = msg.altitude;
+
+  return Eigen::Vector3d(x, y, z);
+}
+
 }  // namespace hdl_graph_slam

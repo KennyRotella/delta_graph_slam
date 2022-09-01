@@ -156,10 +156,10 @@
     <param name="delta_SACMethodType" value="SAC_RANSAC" />
     <!-- fitness score params -->
     <param name="delta_avg_distance_weight" value="1.5" />
-    <param name="delta_coverage_weight" value="0.2" />
-    <param name="delta_transform_weight" value="0.2" />
-    <param name="delta_max_score_distance" value="5.0" />
-    <param name="delta_max_score_translation" value="5.0" />
+    <param name="delta_coverage_weight" value="0.5" />
+    <param name="delta_transform_weight" value="0.5" />
+    <param name="delta_max_score_distance" value="3.5" />
+    <param name="delta_max_score_translation" value="3.5" />
   </node>
   
   <node pkg="delta_graph_slam" type="map2odom_publisher.py" name="map2odom_publisher" />

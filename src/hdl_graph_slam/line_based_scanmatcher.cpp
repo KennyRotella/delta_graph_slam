@@ -74,23 +74,20 @@ BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr 
   return result;
 }
 
-BestFitAlignment LineBasedScanmatcher::align(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment, double max_range) {
+BestFitAlignment LineBasedScanmatcher::align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool constrain_angle, double max_range) {
   
   std::vector<LineFeature::Ptr> linesSource = line_extraction(cloudSource);
-  return align(linesSource, linesTarget, local_alignment, max_range);
-}
-
-BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, bool local_alignment, double max_range) {
-
-  double max_distance = 3.5;
-  double min_cosine = 0.9;
+  
+  // constraints on the global transformation
+  double max_distance = 2.0;
+  double max_angle = M_PI / 9.0;
 
   BestFitAlignment result;
   result.not_aligned_lines = linesSource;
   result.aligned_lines = linesSource;
   result.transformation = Eigen::Matrix4d::Identity();
   result.fitness_score = calc_fitness_score(linesSource, linesTarget, max_range);
-  double result_score = weight(result.fitness_score.avg_distance, result.fitness_score.coverage_percentage, 0.0);
+  double result_score = weight(result.fitness_score.real_avg_distance, result.fitness_score.coverage_percentage, 0.0);
 
   std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
   std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
@@ -98,23 +95,24 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
   for(EdgeFeature::Ptr edgeSource : edgesSource){
     for(EdgeFeature::Ptr edgeTarget : edgesTarget){
 
-      Eigen::Matrix4d transform;
-      if(local_alignment){
-        transform = align_edges(edgeSource, edgeTarget, M_PI/9);
-      } else {
-        transform = align_edges(edgeSource, edgeTarget);
-      }
+      Eigen::Matrix4d transform = align_edges(edgeSource, edgeTarget);
 
       Eigen::Vector3d translation = transform.block<3,1>(0,3);
-
       if(translation.norm() > max_distance || transform == Eigen::Matrix4d::Identity()){
         continue;
+      }
+
+      if(constrain_angle){
+        double angle = Eigen::Rotation2Dd(transform3Dto2D(transform.cast<float>()).cast<double>().block<2,2>(0,0)).angle();
+        if(std::cos(angle) < std::cos(max_angle)){
+          continue;
+        }
       }
 
       std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
 
       FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
-      double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
+      double score = weight(fitness_score.real_avg_distance, fitness_score.coverage_percentage, translation.norm());
 
       if(score > result_score){
         result.aligned_lines = linesSourceTransformed;
@@ -139,7 +137,7 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
     Eigen::Vector3d trgLine = (nn_lineTarget.nearest_neighbor->pointA - nn_lineTarget.nearest_neighbor->pointB).normalized();
 
     double cosine = srcLine.dot(trgLine);
-    if(std::abs(cosine) < min_cosine){
+    if(std::abs(cosine) < std::cos(max_angle)){
       continue;
     }
 
@@ -151,6 +149,93 @@ BestFitAlignment LineBasedScanmatcher::align(std::vector<LineFeature::Ptr> lines
     }
 
     std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(result.aligned_lines, transform);
+
+    FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
+    double score = weight(fitness_score.real_avg_distance, fitness_score.coverage_percentage, translation.norm());
+
+    if(score > result_score){
+      result.aligned_lines = linesSourceTransformed;
+      result.transformation = best_trans * transform;
+      result.fitness_score = fitness_score;
+      result_score = score;
+    }
+  }
+
+  return result;
+}
+
+BestFitAlignment LineBasedScanmatcher::align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double max_range) {
+
+  // constraints on the local transformation
+  double max_distance = 3.5;
+  double max_angle = M_PI / 9.0;
+
+  BestFitAlignment result;
+  result.not_aligned_lines = linesSource;
+  result.aligned_lines = linesSource;
+  result.transformation = Eigen::Matrix4d::Identity();
+  result.fitness_score = calc_fitness_score(linesSource, linesTarget, max_range);
+  double result_score = weight(result.fitness_score.avg_distance, result.fitness_score.coverage_percentage, 0.0);
+
+  std::vector<EdgeFeature::Ptr> edgesSource = edge_extraction(linesSource);
+  std::vector<EdgeFeature::Ptr> edgesTarget = edge_extraction(linesTarget);
+
+  for(EdgeFeature::Ptr edgeSource : edgesSource){
+    for(EdgeFeature::Ptr edgeTarget : edgesTarget){
+
+      Eigen::Matrix4d transform = align_edges(edgeSource, edgeTarget);
+
+      Eigen::Vector3d translation = transform.block<3,1>(0,3);
+      if(translation.norm() > max_distance || transform == Eigen::Matrix4d::Identity()){
+        continue;
+      }
+
+      double angle = Eigen::Rotation2Dd(transform3Dto2D(transform.cast<float>()).cast<double>().block<2,2>(0,0)).angle();
+      if(std::cos(angle) < std::cos(max_angle)){
+        continue;
+      }
+
+      std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(linesSource, transform);
+
+      FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
+      double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
+
+      if(score > result_score){
+        result.aligned_lines = linesSourceTransformed;
+        result.transformation = transform;
+        result.fitness_score = fitness_score;
+        result_score = score;
+      }
+    }
+  }
+
+  // use best transform found so far
+  std::vector<LineFeature::Ptr> best_lines = result.aligned_lines;
+  Eigen::Matrix4d best_trans = result.transformation;
+  for(LineFeature::Ptr lineSource : best_lines){
+
+    NearestNeighbor nn_lineTarget = nearest_neighbor(lineSource, linesTarget);
+
+    if(!nn_lineTarget.nearest_neighbor){
+      continue;
+    }
+
+    Eigen::Vector3d srcLine = (lineSource->pointA - lineSource->pointB).normalized();
+    Eigen::Vector3d trgLine = (nn_lineTarget.nearest_neighbor->pointA - nn_lineTarget.nearest_neighbor->pointB).normalized();
+
+    double cosine = srcLine.dot(trgLine);
+    if(std::abs(cosine) < std::cos(max_angle)){
+      continue;
+    }
+
+    Eigen::Matrix4d transform = align_lines(lineSource, nn_lineTarget.nearest_neighbor);
+    Eigen::Vector3d translation = transform.block<3,1>(0,3);
+
+    if(translation.norm() > max_distance){
+      continue;
+    }
+
+    std::vector<LineFeature::Ptr> linesSourceTransformed = transform_lines(best_lines, transform);
 
     FitnessScore fitness_score = calc_fitness_score(linesSourceTransformed, linesTarget, max_range);
     double score = weight(fitness_score.avg_distance, fitness_score.coverage_percentage, translation.norm());
@@ -408,7 +493,7 @@ double LineBasedScanmatcher::angle_between_vectors(Eigen::Vector3d A, Eigen::Vec
   return angle > 0 ?angle :2*M_PI+angle;  // [-π,+π] -> [0,2π]
 }
 
-Eigen::Matrix4d LineBasedScanmatcher::align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2, double max_angle){
+Eigen::Matrix4d LineBasedScanmatcher::align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2){
 
   // sides edge 1
   Eigen::Vector3d side1A = edge1->pointA-edge1->edgePoint;
@@ -433,10 +518,6 @@ Eigen::Matrix4d LineBasedScanmatcher::align_edges(EdgeFeature::Ptr edge1, EdgeFe
   // [0,2π] -> [-π,+π] 
   if(angle > M_PI){
     angle -= 2*M_PI;
-  }
-
-  if(std::abs(angle) > max_angle){
-    return Eigen::Matrix4d::Identity();
   }
 
   Eigen::Matrix3d rot;
@@ -481,6 +562,7 @@ Eigen::Matrix4d LineBasedScanmatcher::align_lines(LineFeature::Ptr line1, LineFe
   return transform;
 }
 
+// this one does not take into account the lenght of the line
 double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3d point, Eigen::Vector3d line_point, Eigen::Vector3d line_direction){
   line_direction.normalize();
   Eigen::Vector3d projected_point = line_point + line_direction*((point - line_point).dot(line_direction));
@@ -496,16 +578,19 @@ double LineBasedScanmatcher::point_to_line_distance(Eigen::Vector3d point, LineF
   Eigen::Vector3d projected_point = line_point + line_direction*((point - line_point).dot(line_direction));
 
   double dot1 = (projected_point - line->pointA).dot(line->pointB - line->pointA);
+  double dot2 = (projected_point - line->pointB).dot(line->pointA - line->pointB);
+
+  if(dot1 >= 0 && dot2 >= 0){
+    return (point-projected_point).norm();
+  }
+
   if(dot1 < 0){
     return (point - line->pointA).norm();
   }
 
-  double dot2 = (projected_point - line->pointB).dot(line->pointA - line->pointB);
   if(dot2 < 0){
     return (point - line->pointB).norm();
   }
-
-  return (point-projected_point).norm(); 
 }
 
 bool LineBasedScanmatcher::is_point_on_line(Eigen::Vector3d point, LineFeature::Ptr line){
@@ -521,13 +606,21 @@ bool LineBasedScanmatcher::is_point_on_line(Eigen::Vector3d point, LineFeature::
 
 FitnessScore LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_src, LineFeature::Ptr line_trg){
 
+  FitnessScore score;
+
+  // compute real distance without coverage, used in global matching
+  score.real_avg_distance = 0.0;
+  score.real_avg_distance += point_to_line_distance(line_src->pointA, line_trg);
+  score.real_avg_distance += point_to_line_distance(line_src->pointB, line_trg);
+
+  score.real_avg_distance =  score.real_avg_distance / 2.0;
+
+  // compute distance with coverage
   double distance1 = 0;
   double distance2 = 0;
 
   Eigen::Vector3d point1;
   bool point1_found = false;
-  FitnessScore score;
-
   Eigen::Vector3d line_point, line_direction, projected_point;
 
   line_point = line_trg->pointA;
@@ -608,26 +701,36 @@ FitnessScore LineBasedScanmatcher::line_to_line_distance(LineFeature::Ptr line_s
 FitnessScore LineBasedScanmatcher::calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range){
 
   FitnessScore score;
-  double distance = 0;
-  double coverage_lenght = 0;
-  double total_lenght = 0;
+  double real_distance = 0.0;
+  double real_distance_lenght = 0.0;
+  double distance = 0.0;
+  double coverage_lenght = 0.0;
+  double total_lenght = 0.0;
 
   for(LineFeature::Ptr cloud_line: cloud1){
     NearestNeighbor nn_line = nearest_neighbor(cloud_line, cloud2);
-    if(nn_line.distance < max_range){
+    if(nn_line.real_distance < max_range){
+      real_distance += nn_line.real_distance * cloud_line->lenght();
+      real_distance_lenght += cloud_line->lenght();
       distance += nn_line.distance * nn_line.coverage;
       coverage_lenght += nn_line.coverage;
     }
     total_lenght += cloud_line->lenght();
   }
 
-  if(coverage_lenght > 0)
-    distance = distance / coverage_lenght;
-  else
-    distance = std::numeric_limits<double>::max();
-
-  score.avg_distance = distance;
   score.coverage = coverage_lenght;
+
+  if(real_distance_lenght > 0){
+    score.real_avg_distance = real_distance / real_distance_lenght;
+  } else {
+    score.real_avg_distance = std::numeric_limits<double>::max();
+  }
+
+  if(coverage_lenght > 0){
+    score.avg_distance = distance / coverage_lenght;
+  } else {
+    score.avg_distance = std::numeric_limits<double>::max();
+  }
 
   if(total_lenght > 0){
     score.coverage_percentage = coverage_lenght / total_lenght * 100.0;
@@ -643,13 +746,15 @@ LineBasedScanmatcher::NearestNeighbor LineBasedScanmatcher::nearest_neighbor(Lin
   NearestNeighbor nn_line;
   nn_line.nearest_neighbor = nullptr;
   nn_line.distance = std::numeric_limits<double>::max();
+  nn_line.real_distance = std::numeric_limits<double>::max();
   nn_line.coverage = 0;
 
   for(LineFeature::Ptr cloud_line: cloud){
     FitnessScore fitness_score = line_to_line_distance(line, cloud_line);
 
-    if(cloud_line != line && fitness_score.avg_distance < nn_line.distance){
+    if(cloud_line != line && fitness_score.real_avg_distance < nn_line.real_distance){
       nn_line.nearest_neighbor = cloud_line;
+      nn_line.real_distance = fitness_score.real_avg_distance;
       nn_line.distance = fitness_score.avg_distance;
       nn_line.coverage = fitness_score.coverage;
     }

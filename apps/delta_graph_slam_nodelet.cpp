@@ -257,9 +257,9 @@ private:
       Eigen::Matrix4f map_pose_inv = transform2Dto3D(map_pose.inverse().matrix().cast<float>());
       buildings_lines = line_based_scanmatcher->transform_lines(buildings_lines, map_pose_inv.cast<double>());
 
-      // the alignment is local when adding a new keyframe
+      // the alignment angle is constrained when adding a new keyframe
       // the assumption is that the lidar is very accurate once the initial orietation has been fixed
-      result = line_based_scanmatcher->align(flat_cloud, buildings_lines, add_keyframe);
+      result = line_based_scanmatcher->align_global(flat_cloud, buildings_lines, add_keyframe, 3.5);
 
       for(int i=0; i < result.not_aligned_lines.size(); i++){
 
@@ -321,7 +321,7 @@ private:
       double accum_d = keyframe_updater->get_accum_distance();
       adjust_initial_orientation = accum_d == 0;
 
-      std::string base_link_frame = "gt_base_link";
+      std::string gt_base_link_frame = "gt_base_link";
       std::string map_frame = "map";
 
       Eigen::Isometry2d gt_pose = Eigen::Isometry2d::Identity();
@@ -329,14 +329,15 @@ private:
       tf::StampedTransform transform;
       try {
 
-        // tf_listener.waitForTransform(map_frame, base_link_frame, stamp, ros::Duration(1.0));
-        if(!tf_listener.canTransform(map_frame, base_link_frame, stamp)) {
-          std::cerr << "failed to find transform between " << base_link_frame << " and " << map_frame << " at stamp " << stamp << std::endl;
+        // tf_listener.waitForTransform(map_frame, gt_base_link_frame, stamp, ros::Duration(1.0));
+        if(!tf_listener.canTransform(map_frame, gt_base_link_frame, stamp)) {
+          std::cerr << "failed to find transform between " << gt_base_link_frame << " and " << map_frame << " at stamp " << stamp << std::endl;
         } else {
-          tf_listener.lookupTransform(map_frame, base_link_frame, stamp, transform);
+          tf_listener.lookupTransform(map_frame, gt_base_link_frame, stamp, transform);
 
           Eigen::Isometry3d gt_pose3D;
           tf::transformTFToEigen(transform, gt_pose3D);
+          gt_pose3D = gt_pose3D;
           gt_pose = Eigen::Isometry2d(transform3Dto2D(gt_pose3D.matrix().cast<float>()).cast<double>());
         }
 
@@ -394,6 +395,7 @@ private:
 
       std::string base_link_frame = "base_link";
       std::string gps_frame = gps_msg->header.frame_id;
+      std::string camera_gray_left_frame = "camera_gray_left";
 
       if(!tf_listener.canTransform(base_link_frame, gps_frame, ros::Time(0))) {
         std::cerr << "failed to find transform between " << base_link_frame << " and " << gps_frame << std::endl;
@@ -412,6 +414,22 @@ private:
       }
       
       std::cout << "transform between " << gps_frame << " and " << base_link_frame << std::endl << gps_to_baselink_trans << std::endl;
+
+      if(!tf_listener.canTransform(base_link_frame, camera_gray_left_frame, ros::Time(0))) {
+        std::cerr << "failed to find transform between " << base_link_frame << " and " << camera_gray_left_frame << std::endl;
+      }
+
+      tf_listener.waitForTransform(base_link_frame, camera_gray_left_frame, ros::Time(0), ros::Duration(5.0));
+      try {
+        tf_listener.lookupTransform(base_link_frame, camera_gray_left_frame, ros::Time(0), transform);
+
+        Eigen::Isometry3d transform_isometry;
+        tf::transformTFToEigen(transform, grey_camera_to_baselink_trans);
+      } catch(tf2::LookupException e){
+        std::cerr << e.what() << std::endl;
+      }
+      
+      std::cout << "transform between " << camera_gray_left_frame << " and " << base_link_frame << std::endl << grey_camera_to_baselink_trans.matrix() << std::endl;
 
       xy.x() -= gps_to_baselink_trans.x();
       xy.y() -= gps_to_baselink_trans.y();
@@ -596,14 +614,14 @@ private:
         std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, building_pose.inverse());
         std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, building_pose.inverse() * odom_matrix);
 
-        BestFitAlignment result = line_based_scanmatcher->align(building_lines, not_aligned_lines, true, 1.5);
+        BestFitAlignment result = line_based_scanmatcher->align_local(building_lines, not_aligned_lines, 3.0);
 
         std::vector<LineFeature::Ptr> map_building_lines = line_based_scanmatcher->transform_lines(result.aligned_lines, building_pose);
         for(LineFeature::Ptr line : map_building_lines){
           *transformed_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
         }
 
-        if(result.fitness_score.avg_distance > 1.0 || result.transformation == Eigen::Matrix4d::Identity()){
+        if(result.fitness_score.avg_distance > 1.5 || result.transformation == Eigen::Matrix4d::Identity()){
           continue;
         }
 
@@ -623,7 +641,8 @@ private:
       *aligned_buildings_cloud += *transformed_cloud;
       aligned_buildings_pub.publish(*aligned_buildings_cloud);
 
-      if(keyframe->global_alignment.fitness_score.avg_distance > 3.0){
+      if(keyframe->global_alignment.fitness_score.real_avg_distance > 3.5 ||
+        keyframe->global_alignment.fitness_score.coverage < 35.0){
         continue;
       }
 
@@ -755,8 +774,6 @@ private:
 
     graph_slam->optimize(num_iterations, 1);
 
-    std::vector<Building::Ptr> overlapped_buildings = getOverlappedBuildings();
-
     pcl::PointCloud<PointT>::Ptr overlapped_buildings_cloud(new pcl::PointCloud<PointT>());
     overlapped_buildings_cloud->header.frame_id = "map";
     overlapped_buildings_cloud->header.stamp = ros::Time::now().nsec/1000.0;
@@ -766,40 +783,54 @@ private:
     }
     edges_btw_overlapped_buildings.clear();
 
-    // paired overlapped buildings are contiguously indexed
-    for(int i=0; i<overlapped_buildings.size(); i+=2){
-      Building::Ptr A = overlapped_buildings[i];
-      Building::Ptr B = overlapped_buildings[i+1];
-      BestFitAlignment result = line_based_scanmatcher->align_overlapped_buildings(A,B);
+    int max_number_iterations = 15;
 
-      if(result.transformation != Eigen::Matrix4d::Identity()){
-        Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
-        Eigen::Isometry2d relpose = (trans * A->estimate()).inverse() * B->estimate();
+    while(true){
+      std::vector<Building::Ptr> overlapped_buildings = getOverlappedBuildings();
 
-
-        Eigen::MatrixXd information_matrix = Eigen::MatrixXd::Identity(3, 3) * 10000;
-        auto edge = graph_slam->add_se2_edge(A->node, B->node, relpose, information_matrix);
-        edge->setLevel(2);
-        graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
-
-        edges_btw_overlapped_buildings.push_back(edge);
+      if(overlapped_buildings.size() == 0){
+        break;
       }
 
-      for(LineFeature::Ptr line : result.aligned_lines){
-        *overlapped_buildings_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
+      if(max_number_iterations <= 0){
+        std::cout << "Could not remove overlapping from all buildings!" << std::endl;
+        break;
       }
 
-      *overlapped_buildings_cloud += *B->getCloud();
+      // paired overlapped buildings are contiguously indexed
+      for(int i=0; i<overlapped_buildings.size(); i+=2){
+        Building::Ptr A = overlapped_buildings[i];
+        Building::Ptr B = overlapped_buildings[i+1];
+        BestFitAlignment result = line_based_scanmatcher->align_overlapped_buildings(A,B);
+
+        if(result.transformation != Eigen::Matrix4d::Identity()){
+          Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
+          Eigen::Isometry2d relpose = (trans * A->estimate()).inverse() * B->estimate();
+
+
+          Eigen::MatrixXd information_matrix = Eigen::MatrixXd::Identity(3, 3) * 10000;
+          auto edge = graph_slam->add_se2_edge(A->node, B->node, relpose, information_matrix);
+          edge->setLevel(2);
+          graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("building_edge_robust_kernel", "NONE"), private_nh.param<double>("building_edge_robust_kernel", 1.0));
+
+          edges_btw_overlapped_buildings.push_back(edge);
+        }
+
+        for(LineFeature::Ptr line : result.aligned_lines){
+          *overlapped_buildings_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
+        }
+
+        *overlapped_buildings_cloud += *B->getCloud();
+      }
+
+      // update the newly added non-overlapping constraints
+      graph_slam->optimize(num_iterations, 2);
+
+      max_number_iterations--;
     }
 
+
     overlapped_buildings_pub.publish(*overlapped_buildings_cloud);
-
-    std::cout << "sleep bef" << std::endl;
-    ros::WallDuration(2).sleep();
-    std::cout << "sleep aft" << std::endl;
-
-    // update the newly added non-overlapping constraints
-    graph_slam->optimize(num_iterations, 2);
 
     // publish tf
     const auto& keyframe = keyframes.back();
@@ -1232,6 +1263,7 @@ private:
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
 
+  Eigen::Isometry3d grey_camera_to_baselink_trans;
   Eigen::Vector3d gps_to_baselink_trans;
   boost::optional<Eigen::Vector2d> zero_utm;
   int zero_utm_zone;
