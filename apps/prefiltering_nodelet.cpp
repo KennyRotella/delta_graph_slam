@@ -134,15 +134,19 @@ private:
         return;
       }
 
+      Eigen::Isometry3d transform_isometry;
+      tf::transformTFToEigen(transform, transform_isometry);
+
+      // lidar scans should be centered in base_link
+      transform_isometry(0,3) = 0.0;
+      transform_isometry(1,3) = 0.0;
+      lidar_position = transform_isometry.translation();
+
       pcl::PointCloud<PointT>::Ptr transformed(new pcl::PointCloud<PointT>());
-      pcl_ros::transformPointCloud(*src_cloud, *transformed, transform);
+      pcl::transformPointCloud(*src_cloud, *transformed, transform_isometry.matrix());
       transformed->header.frame_id = base_link_frame;
       transformed->header.stamp = src_cloud->header.stamp;
       src_cloud = transformed;
-
-      Eigen::Isometry3d transform_isometry;
-      tf::transformTFToEigen(transform, transform_isometry);
-      lidar_position = transform_isometry.translation();
     }
 
     pcl::PointCloud<PointT>::ConstPtr filtered3D;
