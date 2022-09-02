@@ -149,6 +149,7 @@ class LineBasedScanmatcher {
   FitnessScore line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
   FitnessScore calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range = std::numeric_limits<double>::max());
   NearestNeighbor nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
+  LineFeature::Ptr are_lines_aligned(LineFeature::Ptr line1, LineFeature::Ptr line2);
   std::vector<LineFeature::Ptr> merge_lines(std::vector<LineFeature::Ptr> lines);
 };
 

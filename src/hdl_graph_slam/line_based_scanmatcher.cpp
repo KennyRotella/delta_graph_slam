@@ -77,6 +77,7 @@ BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr 
 BestFitAlignment LineBasedScanmatcher::align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool constrain_angle, double max_range) {
   
   std::vector<LineFeature::Ptr> linesSource = line_extraction(cloudSource);
+  linesTarget = merge_lines(linesTarget);
   
   // constraints on the global transformation
   double max_distance = 2.0;
@@ -788,6 +789,99 @@ std::vector<LineFeature::Ptr> LineBasedScanmatcher::transform_lines(std::vector<
   }
 
   return transformed_lines;
+}
+
+LineFeature::Ptr LineBasedScanmatcher::are_lines_aligned(LineFeature::Ptr line1, LineFeature::Ptr line2){
+  // lines should be almost parallel
+  double cosine = (line1->pointA - line1->pointB).normalized().dot(
+                  (line2->pointA - line2->pointB).normalized());
+
+  if(std::abs(cosine) < 0.9995){
+    return nullptr;
+  }
+
+  double threshold = 0.3;
+
+  // if two lines are identical
+  if(((line1->pointA - line2->pointA).norm() < threshold && (line1->pointB - line2->pointB).norm() < threshold) ||
+     ((line1->pointA - line2->pointB).norm() < threshold && (line1->pointB - line2->pointA).norm() < threshold)){
+    return line1;
+  }
+
+  if((line1->pointA - line2->pointA).norm() < threshold){
+    // if lines are overlapped
+    if(is_point_on_line(line1->pointB, line2) ||
+      is_point_on_line(line2->pointB, line1)){
+      return nullptr;
+    }
+
+    LineFeature::Ptr merged_line(new LineFeature());
+    merged_line->pointA = line1->pointB;
+    merged_line->pointB = line2->pointB;
+
+    return merged_line;
+
+  } else if((line1->pointA - line2->pointB).norm() < threshold){
+    // if lines are overlapped
+    if(is_point_on_line(line1->pointB, line2) ||
+      is_point_on_line(line2->pointA, line1)){
+      return nullptr;
+    }
+
+    LineFeature::Ptr merged_line(new LineFeature());
+    merged_line->pointA = line1->pointB;
+    merged_line->pointB = line2->pointA;
+
+    return merged_line;
+
+  } else if((line1->pointB - line2->pointA).norm() < threshold) {
+    // if lines are overlapped
+    if(is_point_on_line(line1->pointA, line2) ||
+      is_point_on_line(line2->pointB, line1)){
+      return nullptr;
+    }
+
+    LineFeature::Ptr merged_line(new LineFeature());
+    merged_line->pointA = line1->pointA;
+    merged_line->pointB = line2->pointB;
+
+    return merged_line;
+
+  } else if((line1->pointB - line2->pointB).norm() < threshold){
+    // if lines are overlapped
+    if(is_point_on_line(line1->pointA, line2) ||
+      is_point_on_line(line2->pointA, line1)){
+      return nullptr;
+    }
+
+    LineFeature::Ptr merged_line(new LineFeature());
+    merged_line->pointA = line1->pointA;
+    merged_line->pointB = line2->pointA;
+
+    return merged_line;
+
+  }
+
+  return nullptr;
+}
+
+std::vector<LineFeature::Ptr> LineBasedScanmatcher::merge_lines(std::vector<LineFeature::Ptr> lines){
+
+  for(int i=0; i<lines.size(); i++){
+  LineFeature::Ptr line1 = lines[i];
+    for(int j=i+1; j<lines.size(); j++){
+      LineFeature::Ptr line2 = lines[j];
+      LineFeature::Ptr merged_lines = are_lines_aligned(line1, line2);
+      if(merged_lines != nullptr){
+        lines.erase(lines.begin() + j);
+        lines[i] = merged_lines;
+        i--;
+        break;
+      }
+    }
+  }
+
+  return lines;
 }
 
 }  // namespace hdl_graph_slam
