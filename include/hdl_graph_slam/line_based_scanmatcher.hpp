@@ -1,6 +1,7 @@
 #ifndef LINE_BASED_SCANMATCHER_HPP
 #define LINE_BASED_SCANMATCHER_HPP
 
+#include <ros/ros.h>
 #include <pcl_ros/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/ModelCoefficients.h>
@@ -57,6 +58,7 @@ struct BestFitAlignment {
   std::vector<LineFeature::Ptr> aligned_lines;
   Eigen::Matrix4d transformation;
   FitnessScore fitness_score;
+  bool isEdgeAligned;
 };
 
 // forward declaration due to recursive dependencies
@@ -110,7 +112,7 @@ class LineBasedScanmatcher {
   
   BestFitAlignment align_overlapped_buildings(boost::shared_ptr<Building> A, boost::shared_ptr<Building> B);
   BestFitAlignment align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool constrain_angle = false, double max_range = std::numeric_limits<double>::max());
-  BestFitAlignment align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double max_range = std::numeric_limits<double>::max());
+  BestFitAlignment align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, ros::Publisher& pub, Eigen::Matrix4d building_pose, double max_range = std::numeric_limits<double>::max());
   static std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
 
   public:
@@ -131,9 +133,9 @@ class LineBasedScanmatcher {
   
   double weight(double avg_distance, double coverage_percentage, double translation_distance) const {
     return 
-      - avg_distance_weight * (std::min(max_score_distance, avg_distance) / max_score_distance) * 100
+      - avg_distance_weight * (std::min(max_score_distance, avg_distance) / max_score_distance) * 100.
       + coverage_weight * coverage_percentage
-      - transform_weight * (std::min(max_score_translation, translation_distance) / max_score_translation) * 100;
+      - transform_weight * (std::min(max_score_translation, translation_distance) / max_score_translation) * 100.;
   }
   pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
@@ -148,7 +150,7 @@ class LineBasedScanmatcher {
   bool is_point_on_line(Eigen::Vector3d point, LineFeature::Ptr line);
   FitnessScore line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
   FitnessScore calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range = std::numeric_limits<double>::max());
-  NearestNeighbor nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
+  std::vector<NearestNeighbor> nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
   LineFeature::Ptr are_lines_aligned(LineFeature::Ptr line1, LineFeature::Ptr line2);
   std::vector<LineFeature::Ptr> merge_lines(std::vector<LineFeature::Ptr> lines);
 };

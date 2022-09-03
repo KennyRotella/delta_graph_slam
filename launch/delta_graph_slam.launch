@@ -137,9 +137,10 @@
     <param name="delta_max_stddev_x" value="2.0" />
     <param name="delta_min_stddev_q" value="0.05" />
     <param name="delta_max_stddev_q" value="0.2" />
-    <param name="delta_avg_fitness_score" value="1.0" />
+    <param name="delta_avg_fitness_score" value="1.75" />
+    <param name="delta_importance_ratio_global" value="500" />
+    <param name="delta_importance_ratio_local" value="25" />
 
-    <param name="delta_importance_ratio" value="500" />
     <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
     <param name="delta_enable_buildings" value="$(arg enable_buildings)" />
 

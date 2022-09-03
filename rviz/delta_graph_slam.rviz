@@ -24,7 +24,7 @@ Panels:
     Experimental: false
     Name: Time
     SyncMode: 0
-    SyncSource: TargetBuildingsCloud
+    SyncSource: Map
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -58,13 +58,13 @@ Visualization Manager:
         base_link:
           Value: true
         camera_color_left:
-          Value: false
+          Value: true
         camera_color_right:
-          Value: false
+          Value: true
         camera_gray_left:
-          Value: false
+          Value: true
         camera_gray_right:
-          Value: false
+          Value: true
         gt_base_link:
           Value: true
         imu_link:
@@ -83,6 +83,8 @@ Visualization Manager:
       Tree:
         map:
           gt_base_link:
+            {}
+          odom:
             {}
       Update Interval: 0
       Value: true
@@ -182,7 +184,7 @@ Visualization Manager:
       Color: 255; 0; 0
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -197,35 +199,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
-    - Alpha: 1
-      Autocompute Intensity Bounds: true
-      Autocompute Value Bounds:
-        Max Value: 10
-        Min Value: -10
-        Value: true
-      Axis: Z
-      Channel Name: intensity
-      Class: rviz/PointCloud2
-      Color: 0; 255; 255
-      Color Transformer: FlatColor
-      Decay Time: 0
-      Enabled: false
-      Invert Rainbow: false
-      Max Color: 114; 159; 207
-      Min Color: 114; 159; 207
-      Name: NotAlignedLines
-      Position Transformer: XYZ
-      Queue Size: 10
-      Selectable: true
-      Size (Pixels): 3
-      Size (m): 0.10000000149011612
-      Style: Flat Squares
-      Topic: /delta_graph_slam/not_aligned_cloud
-      Unreliable: false
-      Use Fixed Frame: true
-      Use rainbow: false
-      Value: false
+      Value: true
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -242,6 +216,34 @@ Visualization Manager:
       Invert Rainbow: false
       Max Color: 114; 159; 207
       Min Color: 114; 159; 207
+      Name: NotAlignedLines
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.10000000149011612
+      Style: Flat Squares
+      Topic: /delta_graph_slam/not_aligned_cloud
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: false
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud2
+      Color: 0; 255; 255
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: false
+      Invert Rainbow: false
+      Max Color: 114; 159; 207
+      Min Color: 114; 159; 207
       Name: AlignedLines
       Position Transformer: XYZ
       Queue Size: 10
@@ -253,7 +255,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: false
-      Value: true
+      Value: false
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
@@ -294,7 +296,7 @@ Visualization Manager:
       Color: 252; 233; 79
       Color Transformer: FlatColor
       Decay Time: 0
-      Enabled: false
+      Enabled: true
       Invert Rainbow: false
       Max Color: 255; 255; 255
       Min Color: 0; 0; 0
@@ -309,7 +311,7 @@ Visualization Manager:
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
-      Value: false
+      Value: true
     - Class: rviz/MarkerArray
       Enabled: true
       Marker Topic: /delta_graph_slam/markers
@@ -321,6 +323,14 @@ Visualization Manager:
         gt_pose: true
         keyframe_nodes: true
         loop_close_radius: true
+      Queue Size: 100
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /delta_graph_slam/markers_2
+      Name: MarkerArray
+      Namespaces:
+        {}
       Queue Size: 100
       Value: true
   Enabled: true

@@ -100,6 +100,7 @@ public:
     line_based_scanmatcher->setMax_score_distance(private_nh.param<double>("delta_max_score_distance", 5.0));
     line_based_scanmatcher->setMax_score_translation(private_nh.param<double>("delta_max_score_translation", 5.0));
     line_based_scanmatcher->print_parameters();
+    inf_calclator->print_parameters();
 
     gps_time_offset = private_nh.param<double>("gps_time_offset", 0.0);
     gps_edge_stddev_xy = private_nh.param<double>("gps_edge_stddev_xy", 10000.0);
@@ -128,6 +129,7 @@ public:
     not_aligned_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/not_aligned_cloud", 16);
     src_cloud_pub = mt_nh.advertise<sensor_msgs::PointCloud2>("/delta_graph_slam/src_cloud_pub", 16);
     markers_pub = mt_nh.advertise<visualization_msgs::MarkerArray>("/delta_graph_slam/markers", 16);
+    markers_pub_2 = mt_nh.advertise<visualization_msgs::MarkerArray>("/delta_graph_slam/markers_2", 16);
     odom2map_pub = mt_nh.advertise<geometry_msgs::TransformStamped>("/delta_graph_slam/odom2pub", 16);
     read_until_pub = mt_nh.advertise<std_msgs::Header>("/delta_graph_slam/read_until", 32);
 
@@ -211,17 +213,6 @@ private:
 
     Eigen::Isometry2d map_pose = odom2map * odom2D;
 
-    // transforming keyframe's odom (ENU) coordinates into UTM coordinates 
-    geodesy::UTMPoint utm;
-    utm.easting   = zero_utm->x() + map_pose(0,2);
-    utm.northing  = zero_utm->y() + map_pose(1,2);
-    utm.altitude  = 0;
-    utm.zone = zero_utm_zone;
-    utm.band = zero_utm_band;
-
-    // convert from utm to lla
-    geographic_msgs::GeoPoint lla = geodesy::toMsg(utm); 
-
     // download and parse buildings
     std::vector<Building::Ptr> buildings;
 
@@ -232,13 +223,8 @@ private:
     Eigen::Isometry2d estimated_odom = map_pose;
 
     pcl::PointCloud<PointT>::Ptr trans_buildings_cloud(new pcl::PointCloud<PointT>);
-    trans_buildings_cloud->header = flat_cloud->header;
-
     pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
-    aligned->header = flat_cloud->header;
-
     pcl::PointCloud<PointT>::Ptr not_aligned(new pcl::PointCloud<PointT>());
-    not_aligned->header = flat_cloud->header;
 
     BestFitAlignment result;
 
@@ -278,7 +264,7 @@ private:
       Eigen::Matrix3d odom_trans = transform3Dto2D(result.transformation.cast<float>()).cast<double>();
       estimated_odom = map_pose.matrix() * odom_trans;
 
-      if(adjust_initial_orientation){
+      if(adjust_initial_orientation && !add_keyframe){
         Eigen::Matrix3f trans = (odom2map * odom_trans).matrix().cast<float>();
 
         // use only rotation to estimate initial orientation
@@ -308,12 +294,12 @@ private:
       src_cloud_pub.publish(trans_cloud);
 
       pcl::transformPointCloud(*not_aligned, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
-      trans_cloud->header = not_aligned->header;
+      trans_cloud->header = flat_cloud->header;
       trans_cloud->header.frame_id = "map";
       not_aligned_pub.publish(trans_cloud);
 
       pcl::transformPointCloud(*aligned, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
-      trans_cloud->header = aligned->header;
+      trans_cloud->header = flat_cloud->header;
       trans_cloud->header.frame_id = "map";
       aligned_pub.publish(trans_cloud);
       
@@ -387,13 +373,8 @@ private:
   void gps_callback(const geographic_msgs::GeoPointStampedPtr& gps_msg) {
     gps_msg->header.stamp += ros::Duration(gps_time_offset);
 
-    // convert (latitude, longitude, altitude) -> (easting, northing, altitude) in UTM coordinate
-    geodesy::UTMPoint utm;
-    geodesy::fromMsg(gps_msg->position, utm);
-    Eigen::Vector2d xy(utm.easting, utm.northing);
-
     // the first gps data position will be the origin of the map
-    if(!zero_utm) {
+    if(!origin) {
       gps_to_baselink_trans = Eigen::Vector3d::Zero();
 
       std::string base_link_frame = "base_link";
@@ -434,15 +415,6 @@ private:
       
       std::cout << "transform between " << camera_gray_left_frame << " and " << base_link_frame << std::endl << grey_camera_to_baselink_trans.matrix() << std::endl;
 
-      xy.x() -= gps_to_baselink_trans.x();
-      xy.y() -= gps_to_baselink_trans.y();
-
-      zero_utm = xy;
-      // zone and band are used later to convert utm coords to lla 
-      // (needed later to download buildings)
-      zero_utm_zone = utm.zone;
-      zero_utm_band = utm.band;
-
       scale = std::cos(gps_msg->position.latitude * M_PI / 180.);
       Eigen::Vector3d xyz = translation_from_gps_msg(gps_msg->position, scale);
       xyz -= gps_to_baselink_trans;
@@ -472,7 +444,7 @@ private:
         break;
       }
 
-      if(keyframe->stamp < (*gps_cursor)->header.stamp || keyframe->utm_coord) {
+      if(keyframe->stamp < (*gps_cursor)->header.stamp || keyframe->gps_coord) {
         continue;
       }
 
@@ -494,25 +466,17 @@ private:
         continue;
       }
 
-      // convert (latitude, longitude, altitude) -> (easting, northing, altitude) in UTM coordinate
-      geodesy::UTMPoint utm;
-      geodesy::fromMsg((*closest_gps)->position, utm);
-      Eigen::Vector2d xy(utm.easting, utm.northing);
-      xy -= (*zero_utm);
-      xy.x() -= gps_to_baselink_trans.x();
-      xy.y() -= gps_to_baselink_trans.y();
-
       Eigen::Vector3d xyz = translation_from_gps_msg((*closest_gps)->position, scale);
       xyz -= *origin;
       xyz -= gps_to_baselink_trans;
 
-      keyframe->utm_coord = Eigen::Vector2d(xyz.x(), xyz.y());
-      // keyframe->utm_coord = xy;
+      Eigen::Vector2d gps_coord = Eigen::Vector2d(xyz.x(), xyz.y());
+      keyframe->gps_coord = gps_coord;
 
       if(private_nh.param<bool>("delta_enable_gps_priors", false)) {
         g2o::OptimizableGraph::Edge* edge;
         Eigen::Matrix2d information_matrix = Eigen::Matrix2d::Identity() / gps_edge_stddev_xy;
-        edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, xy, information_matrix);
+        edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, gps_coord, information_matrix);
         edge->setLevel(0);
         graph_slam->add_robust_kernel(edge, private_nh.param<std::string>("gps_edge_robust_kernel", "NONE"), private_nh.param<double>("gps_edge_robust_kernel_size", 1.0));
 
@@ -619,6 +583,65 @@ private:
 
       odom_matrix = transform2Dto3D(odom.matrix().cast<float>()).cast<double>();
 
+      {
+        std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, odom_matrix);
+        std::vector<EdgeFeature::Ptr> edgesTarget = line_based_scanmatcher->edge_extraction(not_aligned_lines);
+
+        visualization_msgs::MarkerArray markers;
+        markers.markers.resize(1);
+
+        // gps markers
+        visualization_msgs::Marker& gps_marker = markers.markers[0];
+        gps_marker.header.frame_id = "map";
+        gps_marker.header.stamp = keyframe->stamp;
+        gps_marker.ns = "gps";
+        gps_marker.id = 0;
+        gps_marker.type = visualization_msgs::Marker::LINE_LIST;
+
+        gps_marker.pose.orientation.w = 1.0;
+        gps_marker.scale.x = gps_marker.scale.y = gps_marker.scale.z = 0.04;
+
+        gps_marker.points.resize(edgesTarget.size() * 4);
+        gps_marker.colors.resize(edgesTarget.size() * 4);
+        for(int i = 0; i < edgesTarget.size(); i++) {
+
+          auto edge = edgesTarget[i];
+
+          Eigen::Vector3d pt1 = edge->edgePoint;
+          Eigen::Vector3d pt2 = edge->edgePoint + (edge->pointA-edge->edgePoint).normalized();
+          Eigen::Vector3d pt3 = edge->edgePoint + (edge->pointB-edge->edgePoint).normalized();
+
+          gps_marker.points[i * 4].x = pt1.x();
+          gps_marker.points[i * 4].y = pt1.y();
+          gps_marker.points[i * 4 + 1].x = pt2.x();
+          gps_marker.points[i * 4 + 1].y = pt2.y();
+          gps_marker.points[i * 4 + 2].x = pt1.x();
+          gps_marker.points[i * 4 + 2].y = pt1.y();
+          gps_marker.points[i * 4 + 3].x = pt3.x();
+          gps_marker.points[i * 4 + 3].y = pt3.y();
+
+          gps_marker.colors[i * 4].r = 1.0;
+          gps_marker.colors[i * 4].g = 1.0;
+          gps_marker.colors[i * 4].b = 1.0;
+          gps_marker.colors[i * 4].a = 1.0;
+          gps_marker.colors[i * 4 + 1].r = 1.0;
+          gps_marker.colors[i * 4 + 1].g = 1.0;
+          gps_marker.colors[i * 4 + 1].b = 1.0;
+          gps_marker.colors[i * 4 + 1].a = 1.0;
+          gps_marker.colors[i * 4 + 2].r = 1.0;
+          gps_marker.colors[i * 4 + 2].g = 1.0;
+          gps_marker.colors[i * 4 + 2].b = 1.0;
+          gps_marker.colors[i * 4 + 2].a = 1.0;
+          gps_marker.colors[i * 4 + 3].r = 1.0;
+          gps_marker.colors[i * 4 + 3].g = 1.0;
+          gps_marker.colors[i * 4 + 3].b = 1.0;
+          gps_marker.colors[i * 4 + 3].a = 1.0;
+          
+        }
+
+        markers_pub_2.publish(markers);
+      }
+
       for(Building::Ptr building : keyframe->near_buildings){
 
         // local scanmatching is performed using the lidar pointcloud without global alignment
@@ -627,7 +650,9 @@ private:
         std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, building_pose.inverse());
         std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, building_pose.inverse() * odom_matrix);
 
-        BestFitAlignment result = line_based_scanmatcher->align_local(building_lines, not_aligned_lines, 3.0);
+        std::cout << "BUILDING POSE: " << std::endl;
+        std::cout << building->estimate().translation() << std::endl;
+        BestFitAlignment result = line_based_scanmatcher->align_local(building_lines, not_aligned_lines, aligned_buildings_pub, building_pose, 3.0);
 
         std::vector<LineFeature::Ptr> map_building_lines = line_based_scanmatcher->transform_lines(result.aligned_lines, building_pose);
         for(LineFeature::Ptr line : map_building_lines){
@@ -638,7 +663,7 @@ private:
           continue;
         }
 
-        Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(result.fitness_score.avg_distance);
+        Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings_local(result);
 
         Eigen::Isometry2d trans = Eigen::Isometry2d(transform3Dto2D(result.transformation.cast<float>()).cast<double>());
         // relative transformation from keyframe to building pose
@@ -659,7 +684,7 @@ private:
         continue;
       }
 
-      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings(keyframe->global_alignment.fitness_score.avg_distance);
+      Eigen::MatrixXd information_matrix = inf_calclator->calc_information_matrix_buildings_global(keyframe->global_alignment.fitness_score.real_avg_distance);
 
       g2o::OptimizableGraph::Edge* edge;
       edge = graph_slam->add_se2_prior_xy_edge(keyframe->node, estimated_odom.translation(), information_matrix.block<2,2>(0,0));
@@ -1033,11 +1058,11 @@ private:
 
       auto keyframe = keyframes[i];
 
-      if(!keyframe->utm_coord)
+      if(!keyframe->gps_coord)
         continue;
 
       Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
-      Eigen::Vector2d pt2 = *keyframe->utm_coord;
+      Eigen::Vector2d pt2 = *keyframe->gps_coord;
 
       gps_marker.points[i * 2].x = pt1.x();
       gps_marker.points[i * 2].y = pt1.y();
@@ -1072,7 +1097,7 @@ private:
 
       auto keyframe = keyframes[i];
 
-      if(!keyframe->utm_coord)
+      if(!keyframe->gps_coord)
         continue;
 
       Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
@@ -1251,6 +1276,7 @@ private:
   ros::Publisher not_aligned_pub;
   ros::Publisher src_cloud_pub;
   ros::Publisher markers_pub;
+  ros::Publisher markers_pub_2;
 
   std::string map_frame_id;
   std::string odom_frame_id;
@@ -1280,9 +1306,6 @@ private:
   Eigen::Vector3d gps_to_baselink_trans;
   boost::optional<Eigen::Vector3d> origin;
   double scale;
-  boost::optional<Eigen::Vector2d> zero_utm;
-  int zero_utm_zone;
-  char zero_utm_band;
 
   std::vector<g2o::HyperGraph::Edge*> edges_btw_overlapped_buildings;
   BuildingTools::Ptr buildings_manager;
