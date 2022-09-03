@@ -6,6 +6,10 @@
 #include <ros/ros.h>
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
+#include <pcl/search/kdtree.h>
+#include <pcl/common/transforms.h>
+#include <pcl/io/pcd_io.h>
+#include <hdl_graph_slam/line_based_scanmatcher.hpp>
 
 namespace hdl_graph_slam {
 
@@ -34,7 +38,9 @@ public:
   static double calc_fitness_score(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose, double max_range = std::numeric_limits<double>::max());
 
   Eigen::MatrixXd calc_information_matrix(const pcl::PointCloud<PointT>::ConstPtr& cloud1, const pcl::PointCloud<PointT>::ConstPtr& cloud2, const Eigen::Isometry3d& relpose) const;
-  Eigen::MatrixXd calc_information_matrix_buildings(double fitness_score) const;
+  Eigen::MatrixXd calc_information_matrix_buildings_global(double fitness_score) const;
+  Eigen::MatrixXd calc_information_matrix_buildings_local(BestFitAlignment fitness_score) const;
+  void print_parameters();
 
 private:
   double weight(double a, double max_x, double min_y, double max_y, double x) const {
@@ -66,7 +72,8 @@ private:
   double b_max_stddev_q;
   double b_avg_fitness_score;
 
-  double b_importance_ratio;
+  double b_importance_ratio_global;
+  double b_importance_ratio_local;
 };
 
 }  // namespace hdl_graph_slam

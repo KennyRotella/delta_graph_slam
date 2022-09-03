@@ -53,7 +53,7 @@ public:
   pcl::PointCloud<PointT>::ConstPtr flat_cloud;           // 2D flattened point cloud
   BestFitAlignment global_alignment;                      // results from global alignment
   std::vector<Building::Ptr> near_buildings;              // buildings found in proximity
-  boost::optional<Eigen::Vector2d> utm_coord;             // UTM coord obtained by GPS
+  boost::optional<Eigen::Vector2d> gps_coord;             // GPS coordinates converted in ENU coordinates
   Eigen::Isometry2d gt_pose;                              // ground truth pose
 
   g2o::VertexSE2* node;  // node instance
