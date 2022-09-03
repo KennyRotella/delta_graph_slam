@@ -33,7 +33,7 @@ std::vector<Building::Ptr> BuildingTools::getBuildingNodes() {
 	std::vector<Building::Ptr> buildingNodes;
 	for(Building::Ptr building : buildings){
 		if(building->node){
-      buildingNodes.push_back(building);
+			buildingNodes.push_back(building);
 		}
 	}
 	return buildingNodes;
@@ -58,7 +58,7 @@ void BuildingTools::downloadBuildings(geographic_msgs::GeoPoint gps) {
 
 		curlpp::Easy request;
 		curlpp::options::Url url_opt(url);
-		curlpp::options::Timeout timeout(3);
+		curlpp::options::Timeout timeout(6);
 
 		// Setting the URL to retrive.
 		request.setOpt(url_opt);
@@ -137,6 +137,15 @@ std::vector<Building::Ptr> BuildingTools::parseBuildings(geographic_msgs::GeoPoi
 			Eigen::Isometry2d pose = getBuildingPose(nd_refs);
 			g2o::VertexSE2* node = graph_slam->add_se2_node(pose);
 			node->setFixed(false);
+
+			g2o::OptimizableGraph::Edge* edge;
+			edge = graph_slam->add_se2_prior_xy_edge(node, pose.translation(), Eigen::Matrix2d::Identity()*0.001);
+			edge->setLevel(1);
+			graph_slam->add_robust_kernel(edge, "NONE", 1.0);
+
+			edge = graph_slam->add_se2_prior_quat_edge(node, Eigen::Rotation2Dd(pose.linear()), Eigen::Matrix2d::Identity().block<1,1>(0,0)*0.001);
+			edge->setLevel(1);
+			graph_slam->add_robust_kernel(edge, "NONE", 1.0);
 
 			Building::Ptr new_building(new Building(node));
 

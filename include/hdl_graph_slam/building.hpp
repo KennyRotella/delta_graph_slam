@@ -6,6 +6,8 @@
 #include <Eigen/Dense>
 
 #include <g2o/types/slam2d/vertex_se2.h>
+#include <g2o/edge_se2_priorxy.hpp>
+#include <g2o/edge_se2_priorquat.hpp>
 #include <pcl/common/transforms.h>
 #include <hdl_graph_slam/ros_utils.hpp>
 #include <hdl_graph_slam/line_based_scanmatcher.hpp>

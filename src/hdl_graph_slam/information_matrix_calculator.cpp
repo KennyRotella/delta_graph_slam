@@ -2,12 +2,28 @@
 
 #include <hdl_graph_slam/information_matrix_calculator.hpp>
 
-#include <pcl/search/kdtree.h>
-#include <pcl/common/transforms.h>
-#include <pcl/io/pcd_io.h>
-#include <pcl/point_types.h>
-
 namespace hdl_graph_slam {
+
+void InformationMatrixCalculator::print_parameters(){
+  std::cout << "INF MATRIX CALCULATOR PARAMS" << std::endl;
+  std::cout << "use_const_inf_matrix: " << use_const_inf_matrix << std::endl;
+  std::cout << "const_stddev_x: " << const_stddev_x << std::endl;
+  std::cout << "const_stddev_q: " << const_stddev_q << std::endl;
+  std::cout << "var_gain_a: " << var_gain_a << std::endl;
+  std::cout << "min_stddev_x: " << min_stddev_x << std::endl;
+  std::cout << "max_stddev_x: " << max_stddev_x << std::endl;
+  std::cout << "min_stddev_q: " << min_stddev_q << std::endl;
+  std::cout << "max_stddev_q: " << max_stddev_q << std::endl;
+  std::cout << "fitness_score_thresh: " << fitness_score_thresh << std::endl;
+  std::cout << "b_var_gain_a: " << b_var_gain_a << std::endl;
+  std::cout << "b_min_stddev_x: " << b_min_stddev_x << std::endl;
+  std::cout << "b_max_stddev_x: " << b_max_stddev_x << std::endl;
+  std::cout << "b_min_stddev_q: " << b_min_stddev_q << std::endl;
+  std::cout << "b_max_stddev_q: " << b_max_stddev_q << std::endl;
+  std::cout << "b_avg_fitness_score: " << b_avg_fitness_score << std::endl;
+  std::cout << "b_importance_ratio_global: " << b_importance_ratio_global << std::endl;
+  std::cout << "b_importance_ratio_local: " << b_importance_ratio_local << std::endl << std::endl;
+}
 
 InformationMatrixCalculator::InformationMatrixCalculator(ros::NodeHandle& nh) {
   use_const_inf_matrix = nh.param<bool>("use_const_inf_matrix", false);
@@ -28,7 +44,8 @@ InformationMatrixCalculator::InformationMatrixCalculator(ros::NodeHandle& nh) {
   b_max_stddev_q = nh.param<double>("delta_max_stddev_q", 0.2);
   b_avg_fitness_score = nh.param<double>("delta_avg_fitness_score", 0.5);
 
-  b_importance_ratio = nh.param<double>("delta_importance_ratio", 1.0);
+  b_importance_ratio_global = nh.param<double>("delta_importance_ratio_global", 1.0);
+  b_importance_ratio_local = nh.param<double>("delta_importance_ratio_local", 1.0);
 }
 
 InformationMatrixCalculator::~InformationMatrixCalculator() {}
@@ -90,21 +107,53 @@ double InformationMatrixCalculator::calc_fitness_score(const pcl::PointCloud<Poi
     return (std::numeric_limits<double>::max());
 }
 
-Eigen::MatrixXd InformationMatrixCalculator::calc_information_matrix_buildings(double fitness_score) const {
+Eigen::MatrixXd InformationMatrixCalculator::calc_information_matrix_buildings_global(double fitness_score) const {
+
+  if(use_const_inf_matrix) {
+    Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(3, 3);
+    inf.topLeftCorner(2, 2).array() /= const_stddev_x;
+    inf.bottomRightCorner(1, 1).array() /= const_stddev_q;
+    return inf;
+  }
+
+  double min_var_x = std::pow(min_stddev_x, 2);
+  double max_var_x = std::pow(max_stddev_x, 2);
+  double min_var_q = std::pow(min_stddev_q, 2);
+  double max_var_q = std::pow(max_stddev_q, 2);
+
+  float w_x = weight(var_gain_a, fitness_score_thresh, min_var_x, max_var_x, fitness_score);
+  float w_q = weight(var_gain_a, fitness_score_thresh, min_var_q, max_var_q, fitness_score);
+
+  Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(3, 3);
+  inf.topLeftCorner(2, 2).array() /= w_x;
+  inf.bottomRightCorner(1, 1).array() /= w_q;
+
+  return inf / b_importance_ratio_global;
+}
+
+Eigen::MatrixXd InformationMatrixCalculator::calc_information_matrix_buildings_local(BestFitAlignment result) const {
 
   double b_min_var_x = std::pow(b_min_stddev_x, 2);
   double b_max_var_x = std::pow(b_max_stddev_x, 2);
   double b_min_var_q = std::pow(b_min_stddev_q, 2);
   double b_max_var_q = std::pow(b_max_stddev_q, 2);
 
-  float w_x = b_weight(b_var_gain_a, b_avg_fitness_score, b_min_var_x, b_max_var_x, fitness_score);
-  float w_q = b_weight(b_var_gain_a, b_avg_fitness_score, b_min_var_q, b_max_var_q, fitness_score);
+  float w_x = b_weight(b_var_gain_a, b_avg_fitness_score, b_min_var_x, b_max_var_x, result.fitness_score.avg_distance);
+  float w_q = b_weight(b_var_gain_a, b_avg_fitness_score, b_min_var_q, b_max_var_q, result.fitness_score.avg_distance);
 
   Eigen::MatrixXd inf = Eigen::MatrixXd::Identity(3, 3);
   inf.topLeftCorner(2, 2).array() /= w_x;
   inf.bottomRightCorner(1, 1).array() /= w_q;
 
-  return inf / b_importance_ratio;
+  // edges carry more information than single lines
+  if(result.isEdgeAligned){
+    inf *= b_importance_ratio_local;
+  }
+
+  // information based on the overall coverage of the building
+  inf *= result.fitness_score.coverage_percentage / 100.;
+
+  return inf;
 }
 
 }  // namespace hdl_graph_slam
