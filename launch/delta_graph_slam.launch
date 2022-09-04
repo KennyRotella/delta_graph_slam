@@ -121,7 +121,7 @@
     <param name="max_stddev_q" value="0.2" />
     <!-- update params -->
     <param name="graph_update_interval" value="3.0" />
-    <!-- delta params -->
+    <!-- delta_graph_slam additional params -->
     <param name="delta_init_angle" value="0" />
     <param name="delta_init_x" value="0" />
     <param name="delta_init_y" value="0" />
@@ -149,18 +149,24 @@
     <param name="delta_MaxClusterSize" value="25000" />
     <param name="delta_ClusterTolerance" value="1.5" />
     <param name="delta_SACDistanceThreshold" value="0.1" />
-    <param name="delta_Max_iterations" value="250" />
+    <param name="delta_Max_iterations" value="100" />
     <!-- merror is in meters -->
     <param name="delta_Merror_threshold" value="0.1" />
     <param name="delta_lenght_threshold" value="1.5" />
     <!-- methods: SAC_RANSAC,SAC_LMEDS,SAC_MSAC,SAC_RRANSAC,SAC_RMSAC,SAC_MLESAC,SAC_PROSAC -->
     <param name="delta_SACMethodType" value="SAC_RANSAC" />
-    <!-- fitness score params -->
-    <param name="delta_avg_distance_weight" value="1.5" />
-    <param name="delta_coverage_weight" value="0.5" />
-    <param name="delta_transform_weight" value="0.5" />
-    <param name="delta_max_score_distance" value="3.5" />
-    <param name="delta_max_score_translation" value="3.5" />
+    <!-- global fitness score params -->
+    <param name="delta_global_avg_distance_weight" value="1.5" />
+    <param name="delta_global_coverage_weight" value="0.5" />
+    <param name="delta_global_transform_weight" value="0.5" />
+    <param name="delta_global_max_score_distance" value="3.5" />
+    <param name="delta_global_max_score_translation" value="3.5" />
+    <!-- local fitness score params -->
+    <param name="delta_local_avg_distance_weight" value="1.5" />
+    <param name="delta_local_coverage_weight" value="1.5" />
+    <param name="delta_local_transform_weight" value="0.1" />
+    <param name="delta_local_max_score_distance" value="1.0" />
+    <param name="delta_local_max_score_translation" value="3.5" />
   </node>
   
   <node pkg="delta_graph_slam" type="map2odom_publisher.py" name="map2odom_publisher" />

@@ -87,12 +87,17 @@ class LineBasedScanmatcher {
     max_iterations(500),
     merror_threshold(150.0),
     line_lenght_threshold(1.0),
-    // fitness score params
-    avg_distance_weight(0.6),
-    coverage_weight(1.0),
-    transform_weight(0.2),
-    max_score_distance(5.0),
-    max_score_translation(5.0) {}
+    // global fitness score params
+    g_avg_distance_weight(0.6),
+    g_coverage_weight(1.0),
+    g_transform_weight(0.2),
+    g_max_score_distance(5.0),
+    g_max_score_translation(5.0),
+    l_avg_distance_weight(0.6),
+    l_coverage_weight(1.0),
+    l_transform_weight(0.2),
+    l_max_score_distance(5.0),
+    l_max_score_translation(5.0) {}
 
   // Setter to customize algorithm parameter values
   void setMinClusterSize (int min_cluster_size) {this->min_cluster_size = min_cluster_size;};
@@ -103,16 +108,24 @@ class LineBasedScanmatcher {
   void setMax_iterations (float max_iterations) {this->max_iterations = max_iterations;};
   void setMerror_threshold (float merror_threshold) {this->merror_threshold = merror_threshold;};
   void setLine_lenght_threshold (float line_lenght_threshold) {this->line_lenght_threshold = line_lenght_threshold;};
-  void setAvg_distance_weight (double avg_distance_weight) {this->avg_distance_weight = avg_distance_weight;};
-  void setCoverage_weight (double coverage_weight) {this->coverage_weight = coverage_weight;};
-  void setTransform_weight (double transform_weight) {this->transform_weight = transform_weight;};
-  void setMax_score_distance (double max_score_distance) {this->max_score_distance = max_score_distance;};
-  void setMax_score_translation (double max_score_translation) {this->max_score_translation = max_score_translation;};
+
+  void setGlobal_avg_distance_weight (double g_avg_distance_weight) {this->g_avg_distance_weight = g_avg_distance_weight;};
+  void setGlobal_coverage_weight (double g_coverage_weight) {this->g_coverage_weight = g_coverage_weight;};
+  void setGlobal_transform_weight (double g_transform_weight) {this->g_transform_weight = g_transform_weight;};
+  void setGlobal_max_score_distance (double g_max_score_distance) {this->g_max_score_distance = g_max_score_distance;};
+  void setGlobal_max_score_translation (double g_max_score_translation) {this->g_max_score_translation = g_max_score_translation;};
+  void setLocal_avg_distance_weight (double g_avg_distance_weight) {this->g_avg_distance_weight = g_avg_distance_weight;};
+
+  void setlocal_avg_distance_weight (double l_avg_distance_weight) {this->l_avg_distance_weight = l_avg_distance_weight;};
+  void setLocal_coverage_weight (double l_coverage_weight) {this->l_coverage_weight = l_coverage_weight;};
+  void setLocal_transform_weight (double l_transform_weight) {this->l_transform_weight = l_transform_weight;};
+  void setLocal_max_score_distance (double l_max_score_distance) {this->l_max_score_distance = l_max_score_distance;};
+  void setLocal_max_score_translation (double l_max_score_translation) {this->l_max_score_translation = l_max_score_translation;};
   void print_parameters();
   
   BestFitAlignment align_overlapped_buildings(boost::shared_ptr<Building> A, boost::shared_ptr<Building> B);
   BestFitAlignment align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool constrain_angle = false, double max_range = std::numeric_limits<double>::max());
-  BestFitAlignment align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, ros::Publisher& pub, Eigen::Matrix4d building_pose, double max_range = std::numeric_limits<double>::max());
+  BestFitAlignment align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double max_range = std::numeric_limits<double>::max());
   static std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
 
   public:
@@ -125,23 +138,37 @@ class LineBasedScanmatcher {
   float merror_threshold;         // max mean error acceptance threshold
   float line_lenght_threshold;    // min line lenght acceptance threshold
 
-  double avg_distance_weight;     // fitness score weight
-  double coverage_weight;         // fitness score weight
-  double transform_weight;        // fitness score weight
-  double max_score_distance;      // fitness score max avg distance
-  double max_score_translation;   // fitness score max translation distance
+  // Global fitness score
+  double g_avg_distance_weight;     // fitness score weight
+  double g_coverage_weight;         // fitness score weight
+  double g_transform_weight;        // fitness score weight
+  double g_max_score_distance;      // fitness score max avg distance
+  double g_max_score_translation;   // fitness score max translation distance
+
+  // Local fitness score
+  double l_avg_distance_weight;     // fitness score weight
+  double l_coverage_weight;         // fitness score weight
+  double l_transform_weight;        // fitness score weight
+  double l_max_score_distance;      // fitness score max avg distance
+  double l_max_score_translation;   // fitness score max translation distance
   
-  double weight(double avg_distance, double coverage_percentage, double translation_distance) const {
+  double weight_global(double avg_distance, double coverage_percentage, double translation_distance) const {
     return 
-      - avg_distance_weight * (std::min(max_score_distance, avg_distance) / max_score_distance) * 100.
-      + coverage_weight * coverage_percentage
-      - transform_weight * (std::min(max_score_translation, translation_distance) / max_score_translation) * 100.;
+      - g_avg_distance_weight * (std::min(g_max_score_distance, avg_distance) / g_max_score_distance) * 100.
+      + g_coverage_weight * coverage_percentage
+      - g_transform_weight * (std::min(g_max_score_translation, translation_distance) / g_max_score_translation) * 100.;
+  }
+  double weight_local(double avg_distance, double coverage_percentage, double translation_distance) const {
+    return 
+      - l_avg_distance_weight * (std::min(l_max_score_distance, avg_distance) / l_max_score_distance) * 100.
+      + l_coverage_weight * coverage_percentage
+      - l_transform_weight * (std::min(l_max_score_translation, translation_distance) / l_max_score_translation) * 100.;
   }
   pcl::PointIndices::Ptr extract_cluster(pcl::PointCloud<PointT>::Ptr cloud, pcl::PointIndices::Ptr inliers);
   std::vector<LineFeature::Ptr> line_extraction(const pcl::PointCloud<PointT>::ConstPtr& cloud);
-  std::vector<EdgeFeature::Ptr> edge_extraction(std::vector<LineFeature::Ptr> lines);
+  std::vector<EdgeFeature::Ptr> edge_extraction(std::vector<LineFeature::Ptr> lines, bool only_angular_edges = false, double max_dist_angular_edge = 7.0);
   Eigen::Vector3d lines_intersection(LineFeature::Ptr line1, LineFeature::Ptr line2);
-  EdgeFeature::Ptr check_edge(LineFeature::Ptr line1, LineFeature::Ptr line2);
+  std::vector<EdgeFeature::Ptr> get_edges(LineFeature::Ptr line1, LineFeature::Ptr line2, bool only_angular_edges, double max_dist_angular_edge);
   double angle_between_vectors(Eigen::Vector3d A, Eigen::Vector3d B);
   Eigen::Matrix4d align_edges(EdgeFeature::Ptr edge1, EdgeFeature::Ptr edge2);
   Eigen::Matrix4d align_lines(LineFeature::Ptr line1, LineFeature::Ptr line2);
@@ -149,7 +176,7 @@ class LineBasedScanmatcher {
   double point_to_line_distance(Eigen::Vector3d point, LineFeature::Ptr line);
   bool is_point_on_line(Eigen::Vector3d point, LineFeature::Ptr line);
   FitnessScore line_to_line_distance(LineFeature::Ptr line1, LineFeature::Ptr line2);
-  FitnessScore calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, double max_range = std::numeric_limits<double>::max());
+  FitnessScore calc_fitness_score(std::vector<LineFeature::Ptr> cloud1, std::vector<LineFeature::Ptr> cloud2, bool is_local, double max_range = std::numeric_limits<double>::max());
   std::vector<NearestNeighbor> nearest_neighbor(LineFeature::Ptr line, std::vector<LineFeature::Ptr> cloud);
   LineFeature::Ptr are_lines_aligned(LineFeature::Ptr line1, LineFeature::Ptr line2);
   std::vector<LineFeature::Ptr> merge_lines(std::vector<LineFeature::Ptr> lines);
