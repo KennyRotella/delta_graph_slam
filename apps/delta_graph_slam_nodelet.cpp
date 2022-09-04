@@ -94,11 +94,18 @@ public:
       }
     }
 
-    line_based_scanmatcher->setAvg_distance_weight(private_nh.param<double>("delta_avg_distance_weight", 0.6));
-    line_based_scanmatcher->setCoverage_weight(private_nh.param<double>("delta_coverage_weight", 1.0));
-    line_based_scanmatcher->setTransform_weight(private_nh.param<double>("delta_transform_weight", 0.2));
-    line_based_scanmatcher->setMax_score_distance(private_nh.param<double>("delta_max_score_distance", 5.0));
-    line_based_scanmatcher->setMax_score_translation(private_nh.param<double>("delta_max_score_translation", 5.0));
+    line_based_scanmatcher->setGlobal_avg_distance_weight(private_nh.param<double>("delta_global_avg_distance_weight", 1.5));
+    line_based_scanmatcher->setGlobal_coverage_weight(private_nh.param<double>("delta_global_coverage_weight", 0.5));
+    line_based_scanmatcher->setGlobal_transform_weight(private_nh.param<double>("delta_global_transform_weight", 0.5));
+    line_based_scanmatcher->setGlobal_max_score_distance(private_nh.param<double>("delta_global_max_score_distance", 3.5));
+    line_based_scanmatcher->setGlobal_max_score_translation(private_nh.param<double>("delta_global_max_score_translation", 3.5));
+
+    line_based_scanmatcher->setLocal_avg_distance_weight(private_nh.param<double>("delta_local_avg_distance_weight", 1.5));
+    line_based_scanmatcher->setLocal_coverage_weight(private_nh.param<double>("delta_local_coverage_weight", 1.5));
+    line_based_scanmatcher->setLocal_transform_weight(private_nh.param<double>("delta_local_transform_weight", 0.1));
+    line_based_scanmatcher->setLocal_max_score_distance(private_nh.param<double>("delta_local_max_score_distance", 1.0));
+    line_based_scanmatcher->setLocal_max_score_translation(private_nh.param<double>("delta_local_max_score_translation", 3.5));
+
     line_based_scanmatcher->print_parameters();
     inf_calclator->print_parameters();
 
@@ -547,6 +554,63 @@ private:
     return true;
   }
 
+  void draw_angular_edges(std::vector<EdgeFeature::Ptr> edgesTarget, ros::Time stamp){
+
+    visualization_msgs::MarkerArray markers;
+    markers.markers.resize(1);
+
+    // gps markers
+    visualization_msgs::Marker& gps_marker = markers.markers[0];
+    gps_marker.header.frame_id = "map";
+    gps_marker.header.stamp = stamp;
+    gps_marker.ns = "gps";
+    gps_marker.id = 0;
+    gps_marker.type = visualization_msgs::Marker::LINE_LIST;
+
+    gps_marker.pose.orientation.w = 1.0;
+    gps_marker.scale.x = gps_marker.scale.y = gps_marker.scale.z = 0.04;
+
+    gps_marker.points.resize(edgesTarget.size() * 4);
+    gps_marker.colors.resize(edgesTarget.size() * 4);
+    for(int i = 0; i < edgesTarget.size(); i++) {
+
+      auto edge = edgesTarget[i];
+
+      Eigen::Vector3d pt1 = edge->edgePoint;
+      Eigen::Vector3d pt2 = edge->edgePoint + (edge->pointA-edge->edgePoint).normalized();
+      Eigen::Vector3d pt3 = edge->edgePoint + (edge->pointB-edge->edgePoint).normalized();
+
+      gps_marker.points[i * 4].x = pt1.x();
+      gps_marker.points[i * 4].y = pt1.y();
+      gps_marker.points[i * 4 + 1].x = pt2.x();
+      gps_marker.points[i * 4 + 1].y = pt2.y();
+      gps_marker.points[i * 4 + 2].x = pt1.x();
+      gps_marker.points[i * 4 + 2].y = pt1.y();
+      gps_marker.points[i * 4 + 3].x = pt3.x();
+      gps_marker.points[i * 4 + 3].y = pt3.y();
+
+      gps_marker.colors[i * 4].r = 1.0;
+      gps_marker.colors[i * 4].g = 1.0;
+      gps_marker.colors[i * 4].b = 1.0;
+      gps_marker.colors[i * 4].a = 1.0;
+      gps_marker.colors[i * 4 + 1].r = 1.0;
+      gps_marker.colors[i * 4 + 1].g = 1.0;
+      gps_marker.colors[i * 4 + 1].b = 1.0;
+      gps_marker.colors[i * 4 + 1].a = 1.0;
+      gps_marker.colors[i * 4 + 2].r = 1.0;
+      gps_marker.colors[i * 4 + 2].g = 1.0;
+      gps_marker.colors[i * 4 + 2].b = 1.0;
+      gps_marker.colors[i * 4 + 2].a = 1.0;
+      gps_marker.colors[i * 4 + 3].r = 1.0;
+      gps_marker.colors[i * 4 + 3].g = 1.0;
+      gps_marker.colors[i * 4 + 3].b = 1.0;
+      gps_marker.colors[i * 4 + 3].a = 1.0;
+      
+    }
+
+    markers_pub_2.publish(markers);
+  }
+
   bool update_building_nodes() {
 
     if(!private_nh.param<bool>("delta_enable_buildings", true)){
@@ -583,64 +647,9 @@ private:
 
       odom_matrix = transform2Dto3D(odom.matrix().cast<float>()).cast<double>();
 
-      {
-        std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, odom_matrix);
-        std::vector<EdgeFeature::Ptr> edgesTarget = line_based_scanmatcher->edge_extraction(not_aligned_lines);
-
-        visualization_msgs::MarkerArray markers;
-        markers.markers.resize(1);
-
-        // gps markers
-        visualization_msgs::Marker& gps_marker = markers.markers[0];
-        gps_marker.header.frame_id = "map";
-        gps_marker.header.stamp = keyframe->stamp;
-        gps_marker.ns = "gps";
-        gps_marker.id = 0;
-        gps_marker.type = visualization_msgs::Marker::LINE_LIST;
-
-        gps_marker.pose.orientation.w = 1.0;
-        gps_marker.scale.x = gps_marker.scale.y = gps_marker.scale.z = 0.04;
-
-        gps_marker.points.resize(edgesTarget.size() * 4);
-        gps_marker.colors.resize(edgesTarget.size() * 4);
-        for(int i = 0; i < edgesTarget.size(); i++) {
-
-          auto edge = edgesTarget[i];
-
-          Eigen::Vector3d pt1 = edge->edgePoint;
-          Eigen::Vector3d pt2 = edge->edgePoint + (edge->pointA-edge->edgePoint).normalized();
-          Eigen::Vector3d pt3 = edge->edgePoint + (edge->pointB-edge->edgePoint).normalized();
-
-          gps_marker.points[i * 4].x = pt1.x();
-          gps_marker.points[i * 4].y = pt1.y();
-          gps_marker.points[i * 4 + 1].x = pt2.x();
-          gps_marker.points[i * 4 + 1].y = pt2.y();
-          gps_marker.points[i * 4 + 2].x = pt1.x();
-          gps_marker.points[i * 4 + 2].y = pt1.y();
-          gps_marker.points[i * 4 + 3].x = pt3.x();
-          gps_marker.points[i * 4 + 3].y = pt3.y();
-
-          gps_marker.colors[i * 4].r = 1.0;
-          gps_marker.colors[i * 4].g = 1.0;
-          gps_marker.colors[i * 4].b = 1.0;
-          gps_marker.colors[i * 4].a = 1.0;
-          gps_marker.colors[i * 4 + 1].r = 1.0;
-          gps_marker.colors[i * 4 + 1].g = 1.0;
-          gps_marker.colors[i * 4 + 1].b = 1.0;
-          gps_marker.colors[i * 4 + 1].a = 1.0;
-          gps_marker.colors[i * 4 + 2].r = 1.0;
-          gps_marker.colors[i * 4 + 2].g = 1.0;
-          gps_marker.colors[i * 4 + 2].b = 1.0;
-          gps_marker.colors[i * 4 + 2].a = 1.0;
-          gps_marker.colors[i * 4 + 3].r = 1.0;
-          gps_marker.colors[i * 4 + 3].g = 1.0;
-          gps_marker.colors[i * 4 + 3].b = 1.0;
-          gps_marker.colors[i * 4 + 3].a = 1.0;
-          
-        }
-
-        markers_pub_2.publish(markers);
-      }
+      std::vector<LineFeature::Ptr> LiDAR_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, odom_matrix);
+      std::vector<EdgeFeature::Ptr> LiDAR_angular_edges = line_based_scanmatcher->edge_extraction(LiDAR_lines, true);
+      draw_angular_edges(LiDAR_angular_edges, keyframe->stamp);
 
       for(Building::Ptr building : keyframe->near_buildings){
 
@@ -650,16 +659,14 @@ private:
         std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, building_pose.inverse());
         std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, building_pose.inverse() * odom_matrix);
 
-        std::cout << "BUILDING POSE: " << std::endl;
-        std::cout << building->estimate().translation() << std::endl;
-        BestFitAlignment result = line_based_scanmatcher->align_local(building_lines, not_aligned_lines, aligned_buildings_pub, building_pose, 3.0);
+        BestFitAlignment result = line_based_scanmatcher->align_local(building_lines, not_aligned_lines, 0.5);
 
         std::vector<LineFeature::Ptr> map_building_lines = line_based_scanmatcher->transform_lines(result.aligned_lines, building_pose);
         for(LineFeature::Ptr line : map_building_lines){
           *transformed_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
         }
 
-        if(result.fitness_score.avg_distance > 1.5 || result.transformation == Eigen::Matrix4d::Identity()){
+        if(result.transformation == Eigen::Matrix4d::Identity()){
           continue;
         }
 
@@ -679,8 +686,7 @@ private:
       *aligned_buildings_cloud += *transformed_cloud;
       aligned_buildings_pub.publish(*aligned_buildings_cloud);
 
-      if(keyframe->global_alignment.fitness_score.real_avg_distance > 3.5 ||
-        keyframe->global_alignment.fitness_score.coverage < 35.0){
+      if(keyframe->global_alignment.fitness_score.coverage < 35.0){
         continue;
       }
 
