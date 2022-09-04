@@ -106,9 +106,22 @@ BestFitAlignment LineBasedScanmatcher::align_overlapped_buildings(Building::Ptr 
   return result;
 }
 
-BestFitAlignment LineBasedScanmatcher::align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool constrain_angle, double max_range) {
-  
+BestFitAlignment LineBasedScanmatcher::align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, double &line_extraction_time, double &matching_time, bool constrain_angle, double max_range) {
+
+  ros::WallTime start_, end_;
+
+  // count line_extraction_time
+  start_ = ros::WallTime::now();
+
   std::vector<LineFeature::Ptr> linesSource = line_extraction(cloudSource);
+
+  end_ = ros::WallTime::now();
+
+  line_extraction_time = (end_ - start_).toNSec() * 1e-6;
+
+  // count matching_time
+  start_ = ros::WallTime::now();
+
   linesTarget = merge_lines(linesTarget);
   
   // constraints on the global transformation
@@ -199,10 +212,18 @@ BestFitAlignment LineBasedScanmatcher::align_global(pcl::PointCloud<PointT>::Ptr
     }
   }
 
+  end_ = ros::WallTime::now();
+
+  matching_time = (end_ - start_).toNSec() * 1e-6;
+
   return result;
 }
 
-BestFitAlignment LineBasedScanmatcher::align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double max_range) {
+BestFitAlignment LineBasedScanmatcher::align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double &matching_time, double max_range) {
+
+  ros::WallTime start_, end_;
+
+  start_ = ros::WallTime::now();
 
   // constraints on the local transformation
   double max_distance = 2.5;
@@ -292,6 +313,10 @@ BestFitAlignment LineBasedScanmatcher::align_local(std::vector<LineFeature::Ptr>
       }
     }
   }
+
+  end_ = ros::WallTime::now();
+
+  matching_time = (end_ - start_).toNSec() * 1e-6;
 
   return result;
 }

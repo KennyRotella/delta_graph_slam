@@ -124,8 +124,8 @@ class LineBasedScanmatcher {
   void print_parameters();
   
   BestFitAlignment align_overlapped_buildings(boost::shared_ptr<Building> A, boost::shared_ptr<Building> B);
-  BestFitAlignment align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, bool constrain_angle = false, double max_range = std::numeric_limits<double>::max());
-  BestFitAlignment align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double max_range = std::numeric_limits<double>::max());
+  BestFitAlignment align_global(pcl::PointCloud<PointT>::Ptr cloudSource, std::vector<LineFeature::Ptr> linesTarget, double &line_extraction_time, double &matching_time, bool constrain_angle = false, double max_range = std::numeric_limits<double>::max());
+  BestFitAlignment align_local(std::vector<LineFeature::Ptr> linesSource, std::vector<LineFeature::Ptr> linesTarget, double &matching_time, double max_range = std::numeric_limits<double>::max());
   static std::vector<LineFeature::Ptr> transform_lines(std::vector<LineFeature::Ptr> lines, Eigen::Matrix4d transform);
 
   public:

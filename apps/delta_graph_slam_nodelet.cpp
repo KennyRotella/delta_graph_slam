@@ -255,7 +255,43 @@ private:
 
       // the alignment angle is constrained when adding a new keyframe
       // the assumption is that the lidar is very accurate once the initial orietation has been fixed
-      result = line_based_scanmatcher->align_global(flat_cloud, buildings_lines, add_keyframe, 3.5);
+      double line_extraction_time, global_line_matching_time, global_gicp_matching_time;
+      result = line_based_scanmatcher->align_global(flat_cloud, buildings_lines, line_extraction_time, global_line_matching_time, add_keyframe, 3.5);
+
+      int max_iterations = 10;
+      if(global_counter <= max_iterations){
+
+        // count time for global fastGICP
+        {
+          // building cloud transformed in velo_link frame
+          pcl::transformPointCloud(*buildings_cloud, *trans_buildings_cloud, transform2Dto3D(map_pose.inverse().matrix().cast<float>()));
+          trans_buildings_cloud->header = flat_cloud->header;
+
+          ros::WallTime start_, end_;
+
+          start_ = ros::WallTime::now();
+
+          registration->setInputSource(flat_cloud);
+          registration->setInputTarget(trans_buildings_cloud);
+          pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
+          registration->align(*aligned);
+
+          end_ = ros::WallTime::now();
+
+          global_gicp_matching_time = (end_ - start_).toNSec() * 1e-6;
+        }
+
+        tot_line_extraction_time += line_extraction_time;
+        tot_global_line_matching_time += global_line_matching_time;
+        tot_global_gicp_matching_time += global_gicp_matching_time;
+
+        if(global_counter == max_iterations){
+          std::cout << "tot_line_extraction_time: " << tot_line_extraction_time / global_counter << std::endl;
+          std::cout << "tot_global_line_matching_time: " << tot_global_line_matching_time / global_counter << std::endl;
+          std::cout << "tot_global_gicp_matching_time: " << tot_global_gicp_matching_time / global_counter << std::endl;
+        }
+        global_counter++;
+      }
 
       for(int i=0; i < result.not_aligned_lines.size(); i++){
 
@@ -659,7 +695,47 @@ private:
         std::vector<LineFeature::Ptr> building_lines = line_based_scanmatcher->transform_lines(building->lines, building_pose.inverse());
         std::vector<LineFeature::Ptr> not_aligned_lines = line_based_scanmatcher->transform_lines(keyframe->global_alignment.not_aligned_lines, building_pose.inverse() * odom_matrix);
 
-        BestFitAlignment result = line_based_scanmatcher->align_local(building_lines, not_aligned_lines, 0.5);
+        double local_line_matching_time, local_gicp_matching_time;
+        BestFitAlignment result = line_based_scanmatcher->align_local(building_lines, not_aligned_lines, local_line_matching_time, 0.5);
+
+        int max_iterations = 10;
+        if(local_counter <= max_iterations){
+
+          // count time for local fastGICP
+          {
+            pcl::PointCloud<PointT>::Ptr src_cloud(new pcl::PointCloud<PointT>());
+            for(LineFeature::Ptr line : building_lines){
+              *src_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
+            }
+
+            pcl::PointCloud<PointT>::Ptr trg_cloud(new pcl::PointCloud<PointT>());
+            for(LineFeature::Ptr line : not_aligned_lines){
+              *trg_cloud += *interpolate(line->pointA.cast<float>(), line->pointB.cast<float>());
+            }
+
+            ros::WallTime start_, end_;
+
+            start_ = ros::WallTime::now();
+            
+            registration->setInputSource(src_cloud);
+            registration->setInputTarget(trg_cloud);
+            pcl::PointCloud<PointT>::Ptr aligned(new pcl::PointCloud<PointT>());
+            registration->align(*aligned);
+
+            end_ = ros::WallTime::now();
+
+            local_gicp_matching_time = (end_ - start_).toNSec() * 1e-6;
+          }
+
+          tot_local_line_matching_time += local_line_matching_time;
+          tot_local_gicp_matching_time += local_gicp_matching_time;
+
+          if(local_counter == max_iterations){
+            std::cout << "tot_local_line_matching_time: " << tot_local_line_matching_time / local_counter << std::endl;
+            std::cout << "tot_local_gicp_matching_time: " << tot_local_gicp_matching_time / local_counter << std::endl;
+          }
+          local_counter++;
+        }
 
         std::vector<LineFeature::Ptr> map_building_lines = line_based_scanmatcher->transform_lines(result.aligned_lines, building_pose);
         for(LineFeature::Ptr line : map_building_lines){
@@ -1256,6 +1332,16 @@ private:
 
     return true;
   }
+
+  // Benchmarks
+  int global_counter = 0;
+  double tot_line_extraction_time;
+  double tot_global_line_matching_time;
+  double tot_global_gicp_matching_time;
+
+  int local_counter = 0;
+  double tot_local_line_matching_time;
+  double tot_local_gicp_matching_time;
 
   ros::NodeHandle nh;
   ros::NodeHandle mt_nh;
