@@ -2,14 +2,14 @@
 <launch>
 
   <arg name="bag_path" default="/home/massimo/catkin_ws" />
-  <arg name="bag_filename" default="kitti_2011_09_30_drive_0027_synced.bag" />
+  <arg name="bag_filename" default="kitti.bag" />
 
   <node pkg="rosbag" type="play" name="player" args="--clock -r 0.2 $(arg bag_path)/$(arg bag_filename)" output="screen" >
     <remap from="tf" to="tf_old" />
   </node>
 
   <node name="remapper" pkg="tf_remapper_cpp" type="tf_remap">
-    <rosparam param="mappings">[{old: world, new: map},{old: base_link, new: gt_base_link}]</rosparam>
+    <rosparam param="mappings">[{old: world, new: map},{old: base_link, new: gps_base_link},{old: camera_left, new: gt_camera_left}]</rosparam>
   </node>
 
 </launch>
