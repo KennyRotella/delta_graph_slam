@@ -75,6 +75,7 @@ public:
     nmea_parser.reset(new NmeaSentenceParser());
     line_based_scanmatcher.reset(new LineBasedScanmatcher());
 
+    // line based scanmatcher parameters
     line_based_scanmatcher->setMinClusterSize(private_nh.param<int>("delta_MinClusterSize", 25));
     line_based_scanmatcher->setMaxClusterSize(private_nh.param<int>("delta_MaxClusterSize", 25000));
     line_based_scanmatcher->setClusterTolerance(private_nh.param<float>("delta_ClusterTolerance", 1.0));
@@ -146,13 +147,6 @@ public:
     double graph_update_interval = private_nh.param<double>("graph_update_interval", 3.0);
     optimization_timer = mt_nh.createWallTimer(ros::WallDuration(graph_update_interval), &DeltaGraphSlamNodelet::optimization_timer_callback, this);
 
-    registration.reset(new fast_gicp::FastGICP<PointT, PointT>());
-    registration->setNumThreads(private_nh.param<int>("delta_num_threads", 0));
-    registration->setMaximumIterations(private_nh.param<int>("delta_maximum_iterations", 128));
-    registration->setMaxCorrespondenceDistance(private_nh.param<double>("delta_max_correspondence_distance", 4.0));
-    registration->setTransformationEpsilon(private_nh.param<double>("delta_transformation_epsilon", 0.001));
-    registration->setDebugPrint(private_nh.param<bool>("delta_debug_print", true));
-
     // adjust initial orientation
     Eigen::Rotation2Df rot(M_PI*(private_nh.param<float>("delta_init_angle", -31.0f)/180.0f));
     Eigen::Isometry2f trans = Eigen::Isometry2f::Identity();
@@ -169,10 +163,37 @@ public:
       odom2map_pub.publish(ts);
     }
 
-    adjust_initial_orientation = true;
+    initial_orientation = Eigen::Isometry3d::Identity();
+    adjust_initial_orientation = !private_nh.param<bool>("delta_use_imu_for_initial_orientation", false);
   }
 
 private:
+
+  void extract_gt_transforms(KeyFrame::Ptr keyframe, const ros::Time &stamp){
+
+    if(!private_nh.param<bool>("delta_compute_ATE_RPE", false)){
+      return;
+    }
+
+    std::string gt_camera_left = "gt_camera_left";
+    std::string gps_base_link = "gps_base_link";
+    std::string map_frame = "map";
+
+    Eigen::Isometry3d gt_pose3d, baselink_pose3d;
+    Eigen::Isometry2d gt_pose, baselink_pose;
+
+    gt_pose3d = retrieve_transform(tf_listener, map_frame, gt_camera_left, stamp);
+    gt_pose3d = initial_orientation * gray_camera_to_baselink_trans * gt_pose3d * gray_camera_to_baselink_trans.inverse();
+
+    gt_pose = Eigen::Isometry2d(transform3Dto2D(gt_pose3d.matrix().cast<float>()).cast<double>());
+
+    baselink_pose3d = retrieve_transform(tf_listener, map_frame, gps_base_link, stamp);
+    baselink_pose = Eigen::Isometry2d(transform3Dto2D(baselink_pose3d.matrix().cast<float>()).cast<double>());
+
+    keyframe->gt_pose = gt_pose;
+    keyframe->gps_coord.reset(baselink_pose.translation());
+  }
+
   /**
    * @brief received point clouds are pushed to #keyframe_queue
    * @param odom_msg
@@ -240,8 +261,6 @@ private:
     if(!buildings.empty()){
       
       pcl::PointCloud<PointT>::Ptr buildings_cloud(new pcl::PointCloud<PointT>);
-      buildings_cloud->header.frame_id = "map";
-
       std::vector<LineFeature::Ptr> buildings_lines;
 
       for(Building::Ptr building : buildings){
@@ -254,7 +273,7 @@ private:
       Eigen::Matrix4f map_pose_inv = transform2Dto3D(map_pose.inverse().matrix().cast<float>());
       buildings_lines = line_based_scanmatcher->transform_lines(buildings_lines, map_pose_inv.cast<double>());
 
-      // the alignment angle is constrained when adding a new keyframe
+      // the param "bool constrain_angle = add_keyframe" => the alignment angle is constrained when adding a new keyframe
       // the assumption is that the lidar is very accurate once the initial orietation has been fixed
       result = line_based_scanmatcher->align_global(flat_cloud, buildings_lines, add_keyframe, 3.5);
 
@@ -272,6 +291,7 @@ private:
       Eigen::Matrix3d odom_trans = transform3Dto2D(result.transformation.cast<float>()).cast<double>();
       estimated_odom = map_pose.matrix() * odom_trans;
 
+      // between the first and the second keyframe we estimate the initial orientation
       if(adjust_initial_orientation && !add_keyframe){
         Eigen::Matrix3f trans = (odom2map * odom_trans).matrix().cast<float>();
 
@@ -293,82 +313,45 @@ private:
         }
       }
 
-      // better publishing all clouds in the map frame
+      // publish all clouds in the map frame
       pcl::PointCloud<PointT>::Ptr trans_cloud(new pcl::PointCloud<PointT>);
+      Eigen::Matrix4f map_pose4f = transform2Dto3D(map_pose.matrix().cast<float>());
 
-      pcl::transformPointCloud(*flat_cloud, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
+      // LiDAR point cloud before extracting lines
+      pcl::transformPointCloud(*flat_cloud, *trans_cloud, map_pose4f);
       trans_cloud->header = flat_cloud->header;
       trans_cloud->header.frame_id = "map";
       src_cloud_pub.publish(trans_cloud);
 
-      pcl::transformPointCloud(*not_aligned, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
+      // LiDAR point cloud after extracting lines
+      pcl::transformPointCloud(*not_aligned, *trans_cloud, map_pose4f);
       trans_cloud->header = flat_cloud->header;
       trans_cloud->header.frame_id = "map";
       not_aligned_pub.publish(trans_cloud);
 
-      pcl::transformPointCloud(*aligned, *trans_cloud, transform2Dto3D(map_pose.matrix().cast<float>()));
+      // LiDAR point cloud before extracting lines and global scanmatching
+      pcl::transformPointCloud(*aligned, *trans_cloud, map_pose4f);
       trans_cloud->header = flat_cloud->header;
       trans_cloud->header.frame_id = "map";
       aligned_pub.publish(trans_cloud);
       
+      // buildings point cloud without transformations used as target in global scanmatching
+      buildings_cloud->header = flat_cloud->header;
+      buildings_cloud->header.frame_id = "map";
       target_buildings_pub.publish(*buildings_cloud);
     }
 
     if(add_keyframe){
       double accum_d = keyframe_updater->get_accum_distance();
-      adjust_initial_orientation = accum_d == 0;
 
-      std::string gt_camera_left = "gt_camera_left";
-      std::string map_frame = "map";
-
-      Eigen::Isometry2d gt_pose = Eigen::Isometry2d::Identity();
-      Eigen::Isometry2d baselink_pose = Eigen::Isometry2d::Identity();
-
-      tf::StampedTransform transform;
-      try {
-
-        // tf_listener.waitForTransform(map_frame, gt_camera_left, stamp, ros::Duration(1.0));
-        if(!tf_listener.canTransform(map_frame, gt_camera_left, stamp)) {
-          std::cerr << "failed to find transform between " << gt_camera_left << " and " << map_frame << " at stamp " << stamp << std::endl;
-        } else {
-          tf_listener.lookupTransform(map_frame, gt_camera_left, stamp, transform);
-
-          Eigen::Isometry3d gt_pose3D;
-          tf::transformTFToEigen(transform, gt_pose3D);
-
-          Eigen::Isometry3d rotation = Eigen::Isometry3d::Identity();
-
-          Eigen::Matrix3d rot;
-            rot = Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitX())
-              * Eigen::AngleAxisd(0., Eigen::Vector3d::UnitY())
-              * Eigen::AngleAxisd(M_PI / 2.0, Eigen::Vector3d::UnitZ());
-          rotation.linear() = rot;
-
-          gt_pose3D = initial_orientation * gray_camera_to_baselink_trans * gt_pose3D * gray_camera_to_baselink_trans.inverse();
-          gt_pose = Eigen::Isometry2d(transform3Dto2D(gt_pose3D.matrix().cast<float>()).cast<double>());
-
-          // std::cout << "ea1: " << Eigen::Rotation2Dd(gt_pose.linear()).angle() * 180 / M_PI << std::endl;
-          // std::cout << "ea2: " << Eigen::Rotation2Dd(map_pose.linear()).angle() * 180 / M_PI << std::endl;
-        }
-
-        // tf_listener.waitForTransform(map_frame, gt_camera_left, stamp, ros::Duration(1.0));
-        if(!tf_listener.canTransform(map_frame, "gps_base_link", stamp)) {
-          std::cerr << "failed to find transform between " << "gps_base_link" << " and " << map_frame << " at stamp " << stamp << std::endl;
-        } else {
-          tf_listener.lookupTransform(map_frame, "gps_base_link", stamp, transform);
-
-          Eigen::Isometry3d baselink_pose3D;
-          tf::transformTFToEigen(transform, baselink_pose3D);
-
-          baselink_pose = Eigen::Isometry2d(transform3Dto2D(baselink_pose3D.matrix().cast<float>()).cast<double>());
-        }
-
-      } catch(tf2::LookupException e){
-        std::cerr << e.what() << std::endl;
+      // we do not estimate initial orientation once the second keyframe is added
+      if(accum_d > 0){
+        adjust_initial_orientation = false;
       }
 
-      KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, estimated_odom, accum_d, cloud, flat_cloud, result, buildings, gt_pose));
-      *keyframe->gps_coord = baselink_pose.translation();
+      KeyFrame::Ptr keyframe(new KeyFrame(stamp, odom, odom2D, estimated_odom, accum_d, cloud, flat_cloud, result, buildings));
+
+      extract_gt_transforms(keyframe, stamp);
 
       std::lock_guard<std::mutex> lock(keyframe_queue_mutex);
       keyframe_queue.push_back(keyframe);
@@ -400,8 +383,40 @@ private:
     gps_callback(gps_msg);
   }
 
+  // use the first imu message to estimate the initial orientation
+  // this is useful to give the initial orientation to the ground truth
   void imu_callback(const sensor_msgs::ImuConstPtr& imu_msg) {
-    imu_queue.push_back(imu_msg);
+
+    imu_sub.shutdown();
+
+    initial_orientation = Eigen::Isometry3d::Identity();
+    initial_orientation.linear() = Eigen::Quaterniond(imu_msg->orientation.w, imu_msg->orientation.x, imu_msg->orientation.y, imu_msg->orientation.z).toRotationMatrix();
+
+    double initial_angle = Eigen::Rotation2Dd(transform3Dto2D(initial_orientation.matrix().cast<float>()).cast<double>().block<2,2>(0,0)).angle();
+    std::cout << "Found initial orientation: " << initial_angle * 180. / M_PI << std::endl;
+
+    if(private_nh.param<bool>("delta_use_imu_for_initial_orientation", false)){
+      Eigen::Matrix3f trans = transform3Dto2D(initial_orientation.matrix().cast<float>());
+
+      // use only rotation to estimate initial orientation
+      trans.block<2,1>(0,2) = Eigen::Vector2f(0,0);
+
+      if(!keyframes.empty()){
+        anchor_node->setEstimate(Eigen::Isometry2d(trans.cast<double>()));
+        static_cast<g2o::VertexSE2*>(anchor_edge->vertices()[1])->setEstimate(Eigen::Isometry2d(trans.cast<double>()));
+      }
+
+      trans_odom2map_mutex.lock();
+      trans_odom2map = trans * trans_odom2map;
+      trans = trans_odom2map;
+      trans_odom2map_mutex.unlock();
+
+      if(odom2map_pub.getNumSubscribers()) {
+        geometry_msgs::TransformStamped ts = matrix2transform(imu_msg->header.stamp, trans.matrix(), map_frame_id, odom_frame_id);
+        odom2map_pub.publish(ts);
+      }
+    }
+
   }
 
   /**
@@ -413,64 +428,22 @@ private:
 
     // the first gps data position will be the origin of the map
     if(!origin) {
-      gps_to_baselink_trans = Eigen::Vector3d::Zero();
 
-      imu_sub.shutdown();
-
-      std::string map_frame = "map";
       std::string base_link_frame = "base_link";
       std::string gps_frame = "imu_link";
       std::string camera_gray_left_frame = "camera_gray_left";
 
-      if(!tf_listener.canTransform(base_link_frame, gps_frame, ros::Time(0))) {
-        std::cerr << "failed to find transform between " << base_link_frame << " and " << gps_frame << std::endl;
-      }
+      gps_to_baselink_trans = retrieve_transform(tf_listener, base_link_frame, gps_frame, ros::Time(0)).translation();
+      std::cout << "transform from " << base_link_frame << " to " <<  gps_frame << std::endl << gps_to_baselink_trans << std::endl;
 
-      tf::StampedTransform transform, transform1, transform2;
-      tf_listener.waitForTransform(map_frame, base_link_frame, ros::Time(0), ros::Duration(5.0));
-      tf_listener.waitForTransform(map_frame, gps_frame, ros::Time(0), ros::Duration(5.0));
-      try {
-        tf_listener.lookupTransform(map_frame, base_link_frame, ros::Time(0), transform1);
-        tf_listener.lookupTransform(map_frame, gps_frame, ros::Time(0), transform2);
-
-        Eigen::Isometry3d transform_isometry1, transform_isometry2;
-        tf::transformTFToEigen(transform1, transform_isometry1);
-        tf::transformTFToEigen(transform2, transform_isometry2);
-
-        gps_to_baselink_trans = transform_isometry2.translation() - transform_isometry1.translation();
-
-        std::cout << "transform from " << base_link_frame << " to " <<  gps_frame << std::endl << gps_to_baselink_trans << std::endl;
-
-      } catch(tf2::LookupException e){
-        std::cerr << e.what() << std::endl;
-      }
-
-      if(!tf_listener.canTransform(base_link_frame, camera_gray_left_frame, ros::Time(0))) {
-        std::cerr << "failed to find transform between " << base_link_frame << " and " << camera_gray_left_frame << std::endl;
-      }
-
-      tf_listener.waitForTransform(base_link_frame, camera_gray_left_frame, ros::Time(0), ros::Duration(5.0));
-      try {
-        tf_listener.lookupTransform(base_link_frame, camera_gray_left_frame, ros::Time(0), transform);
-
-        tf::transformTFToEigen(transform, gray_camera_to_baselink_trans);
-      } catch(tf2::LookupException e){
-        std::cerr << e.what() << std::endl;
-      }
-      
+      gray_camera_to_baselink_trans = retrieve_transform(tf_listener, base_link_frame, camera_gray_left_frame, ros::Time(0));
       std::cout << "transform from " << base_link_frame << " to " << camera_gray_left_frame << std::endl << gray_camera_to_baselink_trans.matrix() << std::endl;
-
-      std::cout << "IMU queue size: " << imu_queue.size() << std::endl;
-
-      initial_orientation = Eigen::Isometry3d::Identity();
-      initial_orientation.linear() = Eigen::Quaterniond(imu_queue[0]->orientation.w, imu_queue[0]->orientation.x, imu_queue[0]->orientation.y, imu_queue[0]->orientation.z).toRotationMatrix();
-
-      // remove translational offset
-      initial_orientation.translation() = -gray_camera_to_baselink_trans.translation();
-      std::cout << "Found initial orientation: " << std::endl << initial_orientation.matrix() << std::endl;
 
       scale = std::cos(gps_msg->position.latitude * M_PI / 180.);
       Eigen::Vector3d xyz = translation_from_gps_msg(gps_msg->position, scale);
+
+      // the maps are built in the base_link frame
+      // meanwhile the gps estimates itself with an offset from the base_link
       xyz -= gps_to_baselink_trans;
       origin.reset(xyz);
 
@@ -520,34 +493,15 @@ private:
         continue;
       }
 
-      std::string map_frame = "map";
-      std::string base_link_frame = "base_link";
-      std::string gps_frame = "imu_link";
-
-      tf::StampedTransform transform1, transform2;
-      tf_listener.waitForTransform(map_frame, base_link_frame, (*closest_gps)->header.stamp, ros::Duration(5.0));
-      tf_listener.waitForTransform(map_frame, gps_frame, (*closest_gps)->header.stamp, ros::Duration(5.0));
-      try {
-        tf_listener.lookupTransform(map_frame, base_link_frame, (*closest_gps)->header.stamp, transform1);
-        tf_listener.lookupTransform(map_frame, gps_frame, (*closest_gps)->header.stamp, transform2);
-
-        Eigen::Isometry3d transform_isometry1, transform_isometry2;
-        tf::transformTFToEigen(transform1, transform_isometry1);
-        tf::transformTFToEigen(transform2, transform_isometry2);
-
-        gps_to_baselink_trans = transform_isometry2.translation() - transform_isometry1.translation();
-
-      } catch(tf2::LookupException e){
-        std::cerr << e.what() << std::endl;
-      }
-
+      // this is a true absolute position only if there isn't any transformation between the gps and the base_link frames
       Eigen::Vector3d xyz = translation_from_gps_msg((*closest_gps)->position, scale);
       xyz -= *origin;
-      xyz -= gps_to_baselink_trans;
 
       Eigen::Vector2d gps_coord = Eigen::Vector2d(xyz.x(), xyz.y());
-      // WRONG!!
-      keyframe->gps_coord = gps_coord;
+      if(!private_nh.param<bool>("delta_compute_ATE_RPE", false)){
+        // we used a transformed gps from the bag to remove the transformation between the gps and the base_link frames
+        keyframe->gps_coord = gps_coord;
+      }
 
       if(private_nh.param<bool>("delta_enable_gps_priors", false)) {
         g2o::OptimizableGraph::Edge* edge;
@@ -597,7 +551,7 @@ private:
       if(keyframes.empty() && new_keyframes.size() == 1) {
         Eigen::MatrixXd information_matrix = Eigen::MatrixXd::Identity(3, 3);
 
-        anchor_node = graph_slam->add_se2_node(Eigen::Isometry2d::Identity());
+        anchor_node = graph_slam->add_se2_node(odom2map);
         anchor_edge = graph_slam->add_se2_edge(anchor_node, keyframe->node, Eigen::Isometry2d::Identity(), information_matrix);
         if(private_nh.param<bool>("fix_first_node", true)) {
           anchor_node->setFixed(true);
@@ -628,11 +582,11 @@ private:
     visualization_msgs::MarkerArray markers;
     markers.markers.resize(1);
 
-    // gps markers
+    // edges markers
     visualization_msgs::Marker& gps_marker = markers.markers[0];
     gps_marker.header.frame_id = "map";
     gps_marker.header.stamp = stamp;
-    gps_marker.ns = "gps";
+    gps_marker.ns = "edges";
     gps_marker.id = 0;
     gps_marker.type = visualization_msgs::Marker::LINE_LIST;
 
@@ -1166,32 +1120,32 @@ private:
     gt_pose_marker.pose.orientation.w = 1.0;
     gt_pose_marker.scale.x = gt_pose_marker.scale.y = gt_pose_marker.scale.z = 0.04;
 
-    gt_pose_marker.points.resize(keyframes.size() * 2);
-    gt_pose_marker.colors.resize(keyframes.size() * 2);
-    for(int i = 0; i < keyframes.size(); i++) {
+    if(private_nh.param<bool>("delta_compute_ATE_RPE", false)){
 
-      auto keyframe = keyframes[i];
+      gt_pose_marker.points.resize(keyframes.size() * 2);
+      gt_pose_marker.colors.resize(keyframes.size() * 2);
+      for(int i = 0; i < keyframes.size(); i++) {
 
-      if(!keyframe->gps_coord)
-        continue;
+        auto keyframe = keyframes[i];
 
-      Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
-      Eigen::Vector2d pt2 = keyframe->gt_pose.translation();
+        Eigen::Vector2d pt1 = keyframe->node->estimate().translation();
+        Eigen::Vector2d pt2 = keyframe->gt_pose.translation();
 
-      gt_pose_marker.points[i * 2].x = pt1.x();
-      gt_pose_marker.points[i * 2].y = pt1.y();
-      gt_pose_marker.points[i * 2 + 1].x = pt2.x();
-      gt_pose_marker.points[i * 2 + 1].y = pt2.y();
+        gt_pose_marker.points[i * 2].x = pt1.x();
+        gt_pose_marker.points[i * 2].y = pt1.y();
+        gt_pose_marker.points[i * 2 + 1].x = pt2.x();
+        gt_pose_marker.points[i * 2 + 1].y = pt2.y();
 
-      gt_pose_marker.colors[i * 2].r = 0.0;
-      gt_pose_marker.colors[i * 2].g = 0.0;
-      gt_pose_marker.colors[i * 2].b = 1.0;
-      gt_pose_marker.colors[i * 2].a = 1.0;
-      gt_pose_marker.colors[i * 2 + 1].r = 0.0;
-      gt_pose_marker.colors[i * 2 + 1].g = 0.0;
-      gt_pose_marker.colors[i * 2 + 1].b = 1.0;
-      gt_pose_marker.colors[i * 2 + 1].a = 1.0;
-      
+        gt_pose_marker.colors[i * 2].r = 0.0;
+        gt_pose_marker.colors[i * 2].g = 0.0;
+        gt_pose_marker.colors[i * 2].b = 1.0;
+        gt_pose_marker.colors[i * 2].a = 1.0;
+        gt_pose_marker.colors[i * 2 + 1].r = 0.0;
+        gt_pose_marker.colors[i * 2 + 1].g = 0.0;
+        gt_pose_marker.colors[i * 2 + 1].b = 1.0;
+        gt_pose_marker.colors[i * 2 + 1].a = 1.0;
+        
+      }
     }
 
     return markers;
@@ -1246,7 +1200,7 @@ private:
     res.success = ret == 0;
 
     // Compute ATE and RPE errors
-    if(keyframes.size() > 1){
+    if(keyframes.size() > 1 && private_nh.param<bool>("delta_compute_ATE_RPE", false)){
 
       std::vector<double> ATE;
       double mean_ATE = 0.0;
@@ -1282,7 +1236,7 @@ private:
         }
 
         // ATE
-        ATE_i = (keyframe->estimate().translation() - *keyframe->gps_coord).norm();
+        ATE_i = (keyframe->gt_pose.inverse() * keyframe->estimate()).translation().norm();
 
         ATE.push_back(ATE_i);
         mean_ATE += ATE_i;
@@ -1332,7 +1286,7 @@ private:
   ros::WallTimer optimization_timer;
 
   tf::TransformListener tf_listener;
-  bool adjust_initial_orientation;
+  bool adjust_initial_orientation; // without using imu
 
   std::unique_ptr<message_filters::Subscriber<nav_msgs::Odometry>> odom_sub;
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> cloud_sub;
@@ -1377,7 +1331,6 @@ private:
   double gps_edge_stddev_z;
   std::mutex gps_queue_mutex;
   std::deque<geographic_msgs::GeoPointStampedConstPtr> gps_queue;
-  std::deque<sensor_msgs::ImuConstPtr> imu_queue;
 
   Eigen::Isometry3d initial_orientation;
   Eigen::Isometry3d gray_camera_to_baselink_trans;
@@ -1387,7 +1340,6 @@ private:
 
   std::vector<g2o::HyperGraph::Edge*> edges_btw_overlapped_buildings;
   BuildingTools::Ptr buildings_manager;
-  fast_gicp::FastGICP<PointT, PointT>::Ptr registration;
 
   // for map cloud generation
   std::atomic_bool graph_updated;

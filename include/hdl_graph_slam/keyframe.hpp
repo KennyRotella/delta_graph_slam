@@ -36,8 +36,7 @@ public:
     const pcl::PointCloud<PointT>::ConstPtr& cloud,
     const pcl::PointCloud<PointT>::ConstPtr& flat_cloud,
     BestFitAlignment global_alignment,
-    std::vector<Building::Ptr> near_buildings,
-    const Eigen::Isometry2d& gt_pose);
+    std::vector<Building::Ptr> near_buildings);
   virtual ~KeyFrame();
 
   long id() const;

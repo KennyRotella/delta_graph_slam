@@ -7,6 +7,8 @@
   <arg name="enable_gps" default="true" />
   <arg name="enable_gps_priors" default="false" />
   <arg name="enable_buildings" default="true" />
+  <arg name="compute_ATE_RPE" default="false" />
+  <arg name="use_imu_for_initial_orientation" default="true" />
 
   <arg name="points_topic" default="/kitti/velo/pointcloud" />
   <arg name="gps_topic" default="/kitti/oxts/gps/fix" />
@@ -126,12 +128,6 @@
     <param name="delta_init_x" value="0" />
     <param name="delta_init_y" value="0" />
 
-    <param name="delta_num_threads" value="0" />
-    <param name="delta_maximum_iterations" value="64" />
-    <param name="delta_max_correspondence_distance" value="2" />
-    <param name="delta_transformation_epsilon" value="0.001" />
-    <param name="delta_debug_print" value="false" />
-
     <param name="delta_var_gain_a" value="7" />
     <param name="delta_min_stddev_x" value="0.1" />
     <param name="delta_max_stddev_x" value="2.0" />
@@ -143,6 +139,8 @@
 
     <param name="delta_enable_gps_priors" value="$(arg enable_gps_priors)" />
     <param name="delta_enable_buildings" value="$(arg enable_buildings)" />
+    <param name="delta_compute_ATE_RPE" value="$(arg compute_ATE_RPE)" />
+    <param name="delta_use_imu_for_initial_orientation" value="$(arg use_imu_for_initial_orientation)" />
 
     <!-- delta line based scanmatching -->
     <param name="delta_MinClusterSize" value="40" />

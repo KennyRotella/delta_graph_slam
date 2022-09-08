@@ -10,6 +10,7 @@
 #include <geometry_msgs/Pose.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <tf/transform_listener.h>
+#include <tf_conversions/tf_eigen.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <geographic_msgs/GeoPoint.h>
 
@@ -53,6 +54,8 @@ pcl::PointCloud<PointT>::Ptr interpolate(Eigen::Vector3f a, Eigen::Vector3f b);
 Eigen::Vector3d translation_from_gps_msg(geographic_msgs::GeoPoint msg, double scale);
 
 geographic_msgs::GeoPoint gps_msg_from_translation(Eigen::Vector3d translation, double scale);
+
+Eigen::Isometry3d retrieve_transform(const tf::TransformListener &tf_listener, const std::string target_frame, const std::string source_frame, const ros::Time &time);
 
 }  // namespace hdl_graph_slam
 

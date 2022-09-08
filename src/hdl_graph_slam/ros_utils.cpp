@@ -179,7 +179,7 @@ Eigen::Vector3d translation_from_gps_msg(geographic_msgs::GeoPoint msg, double s
   return Eigen::Vector3d(x, y, z);
 }
 
-// helper method to compute latitude and longitude vector from translation
+// helper method to compute latitude and longitude from translation
 geographic_msgs::GeoPoint gps_msg_from_translation(Eigen::Vector3d translation, double scale){
 
   geographic_msgs::GeoPoint gps;
@@ -191,6 +191,33 @@ geographic_msgs::GeoPoint gps_msg_from_translation(Eigen::Vector3d translation, 
   gps.altitude = translation.z();
 
   return gps;
+}
+
+Eigen::Isometry3d retrieve_transform(const tf::TransformListener &tf_listener, const std::string target_frame, const std::string source_frame, const ros::Time &time){
+
+  if(!tf_listener.canTransform(target_frame, source_frame, time)) {
+    std::cerr << "failed to find transform from " << source_frame << " to " << target_frame << std::endl;
+    return Eigen::Isometry3d::Identity();
+  }
+
+  tf::StampedTransform transform;
+  tf_listener.waitForTransform(target_frame, source_frame, time, ros::Duration(0.1));
+  int num_retries = 0;
+  double time_offset = 0.005; // 5ms
+  while(num_retries < 15){
+    try {
+      tf_listener.lookupTransform(target_frame, source_frame, time + ros::Duration(time_offset*num_retries), transform);
+      break;
+    } catch(tf2::LookupException e){
+      std::cerr << e.what() << std::endl;
+      num_retries++;
+    }
+  }
+
+  Eigen::Isometry3d transform_isometry;
+  tf::transformTFToEigen(transform, transform_isometry);
+
+  return transform_isometry;
 }
 
 }  // namespace hdl_graph_slam
