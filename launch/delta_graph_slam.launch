@@ -128,6 +128,9 @@
     <param name="delta_init_x" value="0" />
     <param name="delta_init_y" value="0" />
 
+    <param name="delta_nearby_buildings_radius" value="35" />
+    <param name="delta_buffer_buildings_radius" value="120" />   
+
     <param name="delta_var_gain_a" value="7" />
     <param name="delta_min_stddev_x" value="0.1" />
     <param name="delta_max_stddev_x" value="2.0" />

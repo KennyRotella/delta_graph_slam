@@ -448,7 +448,9 @@ private:
       origin.reset(xyz);
 
       // fetch buildings as soon as possible
-      buildings_manager.reset(new BuildingTools("https://overpass-api.de", *origin, scale, graph_slam.get()));
+      double nearby_buildings_radius = private_nh.param<double>("delta_nearby_buildings_radius", 35.);
+      double buffer_radius = private_nh.param<double>("delta_buffer_buildings_radius", 120.);
+      buildings_manager.reset(new BuildingTools("https://overpass-api.de", *origin, scale, graph_slam.get(), nearby_buildings_radius, buffer_radius));
       buildings_manager->getBuildings(gps_msg->position);
     }
     
